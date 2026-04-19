@@ -103,7 +103,7 @@ impl Physics {
 
     /// 実時間 `dt` 秒分ぶん物理を進める。内部では `1/60s` 固定ステップで回す。
     ///
-    /// 蓄積した実時間は [`MAX_ACCUMULATED_DT`] でクランプする。スリープ・
+    /// 蓄積した実時間は `MAX_ACCUMULATED_DT` (0.25s) でクランプする。スリープ・
     /// デバッガ停止などで巨大な `dt` が入ってきても、アキュムレータの while
     /// ループが CPU を焼き切る spiral-of-death を起こさない。
     pub fn step(&mut self, dt: f64) {
