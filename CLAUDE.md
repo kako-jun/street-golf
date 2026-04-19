@@ -10,7 +10,7 @@ Single-crate binary depending on the external [`termray`](https://github.com/kak
 
 - `src/main.rs` — entry point, input loop, frame presentation (crossterm half-block output)
 - `src/lib.rs` — public surface. Empty at Phase 0, will grow with each phase
-- `src/course.rs` (Phase 1) — `Course`: termray::HeightMap implementation for the terrain, tee / fairway / green / hole layout
+- `src/course.rs` (Phase 1 — 実装済) — `Course`: implements `termray::TileMap` + `termray::HeightMap`. Hand-drawn 200×40 layout with tee / fairway / rough / bunkers / water / green + pin. Per-corner floor heights are precomputed with a seed-derived low-frequency noise base, a flat 20m rooftop tee, a water surface at -0.2m (solid), and a green bowl centered on the pin.
 - `src/physics.rs` (Phase 2) — rapier3d rigid-body world, ball state, course collider generation, step-and-sample integration
 - `src/shot.rs` (Phase 3) — shot input (club selection, aim, power) and the shot → ball-flight → rest sequence
 - `src/hud.rs` (Phase 4) — score card, club picker, wind / distance / lie indicators
@@ -27,7 +27,7 @@ cargo fmt --all
 
 ## Current phase
 
-Phase 0 — skeleton. `cargo run` blanks the framebuffer to a dark meadow green for ~0.8 s then exits cleanly. The Cargo manifest (with `rapier3d` dependency reserved for Phase 2), CI / release workflows, and documentation are in place; Phase 1+ will make it interactive.
+Phase 1 — synthetic course. `cargo run --release --example fly_through` opens a 200m × 40m hand-drawn course (tee / fairway / rough / two bunkers / water hazard / green + pin) on top of termray 0.3's sloped-floor rendering. `Course::generate(42)` is seed-deterministic; the walkthrough lets you verify the terrain before ball physics land in Phase 2. `src/main.rs` still runs the Phase 0 splash — it stays untouched until Phase 2 wires rapier3d in.
 
 ## Roadmap
 

@@ -7,6 +7,14 @@ All notable changes to street-golf are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- Phase 1 synthetic course ([#2](https://github.com/kako-jun/street-golf/issues/2)).
+  `src/course.rs` introduces `Course`, which implements both `termray::TileMap`
+  and `termray::HeightMap` for a hand-drawn 200m × 40m layout (rooftop tee,
+  fairway, rough, two bunkers, water hazard, green with pin). `Course::generate(seed)`
+  is seed-deterministic; corner heights are precomputed so the `HeightMap`
+  continuity contract is automatically satisfied. `examples/fly_through.rs` lets
+  you walk the course (`cargo run --release --example fly_through`) to verify
+  the terrain before ball physics lands in Phase 2.
 - Project skeleton on top of termray 0.3 and rapier3d 0.32
   ([#1](https://github.com/kako-jun/street-golf/issues/1)). `cargo run` blanks the
   framebuffer to a meadow green for a brief moment and exits cleanly — Phase 1+ will
