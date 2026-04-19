@@ -7,6 +7,22 @@ All notable changes to street-golf are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- Phase 4 hole-out + score card + round end
+  ([#5](https://github.com/kako-jun/street-golf/issues/5)).
+  Phase 4 の完了で **MVP v0.1.0** としての 1 ホール分のプレイアブル体験が
+  揃った（crates.io 公開は別 Issue で扱う）。`src/round.rs` に
+  `RoundState` を追加し、`ParSelect → Playing → Finished` の 3 ステートで
+  進行管理する。`check_hole_out` はカップ半径 5.4cm（R&A/USGA 規格の
+  10.8cm 直径）と速度上限 2m/s の AND 条件で skim-over を防ぎ、
+  `score_label` は Hole in One / Albatross / Eagle / Birdie / Par / Bogey /
+  Double Bogey / Triple Bogey / Over を返す。`Physics::teleport_ball`
+  と `Course::pin_world_pos` を追加し、水タイルで静止すれば 1 打罰して
+  発射位置に戻す。`main.rs` は Par 選択画面（Par 3 / 4 / 5）、プレイ中の
+  スコア HUD、ホールアウト後の結果ダイアログ（framebuffer 中央を薄暗く
+  してオーバーレイ + ストローク履歴）、`Y` でのリトライ（Par は維持）を
+  実装。21 件のユニットテスト（round）+ 2 件（physics / course）を追加、
+  合計 69 件が通る。
+
 - Phase 3 shot input + swing sequence
   ([#4](https://github.com/kako-jun/street-golf/issues/4)).
   `src/shot.rs` introduces the pure-logic `ShotState` machine with four phases
@@ -48,9 +64,14 @@ All notable changes to street-golf are documented in this file. The format is ba
   `softprops/action-gh-release@v2`).
 
 ### Changed
+- `src/main.rs` は Phase 3 のショットループを `RoundState` でラップした
+  3 フェーズ制に拡張。Par 選択 → ショットループ → 結果画面 → リトライの
+  全フローが動く。HUD 行数を 3 → 8 に拡張（結果画面の履歴表示用）。
 - `src/main.rs` replaces the Phase 0 800ms splash with the full Phase 3 game
   loop: input → state tick → physics step → camera update → render → HUD.
   `cargo run --release` is now the playable binary.
 
 ### Notes
+- Phase 4 完了で MVP v0.1.0 相当の遊びが揃ったが、crates.io への公開は
+  別 Issue（Phase 5+ でまとめて扱う）。タグは `[Unreleased]` のまま据え置き。
 - `examples/shot_test.rs` は Phase 2 のハードコード発射検証として据え置き。`ShotState` とは独立。
