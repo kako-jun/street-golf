@@ -2,7 +2,7 @@
 
 TUI street golf — tee off from a rooftop, land on the street, keep playing until you hole out.
 
-> **Status**: Pre-alpha. Only the skeleton works right now (Phase 0 — see [#1](https://github.com/kako-jun/street-golf/issues/1)). Expect the repo to grow Phase by Phase into a playable TUI golf game.
+> **Status**: Pre-alpha. Phase 2 wires rapier3d ball physics into the termray view. Shot input and scoring still land in later phases.
 
 ## Stack
 
@@ -16,9 +16,11 @@ TUI street golf — tee off from a rooftop, land on the street, keep playing unt
 ```bash
 cargo build --release
 ./target/release/street-golf
+cargo run --release --example fly_through   # Phase 1 walk-through of the synthetic course
+cargo run --release --example shot_test     # Phase 2 hardcoded 1-shot physics demo
 ```
 
-At Phase 0 the binary clears the terminal to a dark meadow green for about 0.8 seconds, then exits — just enough to prove the render pipeline links up. Phase 1 will build a synthetic course and render one playable hole.
+The Phase 0 binary still clears the terminal to a dark meadow green for about 0.8 seconds and exits. The Phase 1 `fly_through` example lets you stroll the 200×40 synthetic course. The Phase 2 `shot_test` example fires a preset shot at 0.5s and lets you watch the ball fly, land, roll, and come to rest under rapier3d, with a third-person ShotStanding follow camera.
 
 ## Roadmap
 
