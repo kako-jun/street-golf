@@ -40,8 +40,8 @@ const BALL_SPRITE_TYPE: u8 = 2;
 /// `Physics::AT_REST_DURATION` (0.5s) と合わせて、launch から AtRest まで
 /// 最低 1 秒未満は絶対にならない。片方を上げるときはもう片方も再考すること。
 const FLIGHT_REST_HOLD_SEC: f64 = 0.5;
-/// HUD に予約する行数。Par 選択画面 / プレイ中 / 結果画面すべてで共通。
-/// 結果画面が最大行数を要するのでそれに合わせた。
+/// HUD と End ダイアログ共通の高さ。End ダイアログが 8 行（ヘッダ + 最大 5
+/// 履歴 + フッタ）を必要とするため、ゲーム中の Playing HUD もそれに合わせる。
 const HUD_ROWS: usize = 8;
 /// メインループのターゲット fps (≈60Hz)。
 const FRAME_SLEEP: Duration = Duration::from_millis(16);
@@ -198,6 +198,7 @@ fn handle_play_key(shot: &mut ShotState, code: KeyCode) -> PlayAction {
             PlayAction::Continue
         }
         KeyCode::Char(c) => {
+            // '3'..='5' は Par 選択画面でも使うが、Playing 中はクラブ切替として処理される。
             if let Some(club) = Club::from_digit(c) {
                 shot.select_club(club);
             }
@@ -268,7 +269,9 @@ fn par_select_hud(width: usize) -> String {
     pad_lines(&lines, width)
 }
 
-/// Playing フェーズの HUD 文字列（4 本のコンテンツ行 + padding）。
+/// Playing フェーズの HUD 文字列。`HUD_ROWS=8` で Par 選択画面 / プレイ中 /
+/// End 画面すべて同じ行数に揃える。Playing は 4 本のコンテンツ行 + 4 本の
+/// パディング、End は最大 5 本のストローク履歴 + ヘッダ + フッタ = 8。
 fn play_hud(
     shot: &ShotState,
     round: &RoundState,
@@ -346,9 +349,14 @@ fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
         result.vs_par.to_string()
     };
     let line0 = "========== Round Complete ==========".to_string();
+    // フォーマット方針: "Hole in {total} strokes" で打数とペナルティ込みの合計を
+    // 冒頭に出す。スコアラベル (Birdie/Par 等) はストローク数のみで判定し、
+    // カッコ内の vs Par はペナルティ込みの合計と Par の差分なので、両者が
+    // 食い違うケース（例: Birdie (+1)）はペナルティが 1 以上のときに発生する。
+    // フッタの "Label based on strokes only" 行で注記する。
     let line1 = format!(
-        "Hole in {}!  Par {} -> {} ({}) [Penalties: {}, Total: {}]",
-        result.strokes, result.par, result.label, sign, result.penalties, result.total,
+        "Hole in {} strokes!  Par {} -> {} ({}) [Penalties: {}, Total: {}]",
+        result.total, result.par, result.label, sign, result.penalties, result.total,
     );
     // ストローク履歴は最大 5 行まで（それ以上は省略）。
     let max_log_rows = 5;
@@ -372,7 +380,10 @@ fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
     if log.len() > max_log_rows {
         log_lines.push(format!("  ... (+{} more)", log.len() - max_log_rows));
     }
-    let footer = "[Y] Retry   [N/Esc] Quit".to_string();
+    // Label は strokes のみで判定するため、Penalties 付きの vs Par と Label が
+    // 食い違うことがある（例: Birdie (+1)）。プレイヤー向けに注記する。
+    let footer =
+        "[Y] Retry  [N/Esc] Quit  (Label based on strokes only; penalties excluded)".to_string();
 
     let mut lines: Vec<String> = Vec::with_capacity(HUD_ROWS);
     lines.push(line0);
@@ -531,6 +542,7 @@ fn main() -> Result<()> {
                         EndAction::Retry => {
                             physics = Physics::new(&course, ball_spawn);
                             shot = ShotState::new(0.0);
+                            // shot.yaw も 0.0 に戻るので yaw 0.0 を渡して問題ない。
                             follow = FollowCam::new(FollowMode::ShotStanding, 0.0);
                             round.retry(ball_spawn);
                             flight_timer = 0.0;
@@ -542,7 +554,11 @@ fn main() -> Result<()> {
 
         // --- 物理・状態更新 ---
         shot.tick(dt);
-        physics.step(dt);
+        // Finished はボールが完全停止しているので物理ステップをスキップする。
+        // ball_state() は状態を読むだけなのでカメラ追従は引き続き機能する。
+        if !matches!(round.phase, RoundPhase::Finished) {
+            physics.step(dt);
+        }
 
         let ball = physics.ball_state();
 

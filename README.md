@@ -24,6 +24,9 @@ cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics 
 
 ## Gameplay
 
+水ハザードでボールが止まると +1 打ペナルティでショット開始位置に戻る。
+スコアラベル (Birdie/Par 等) はストローク数のみで判定し、ペナルティは Total と vs Par に反映される。
+
 1. **Par select screen** — choose Par 3 / 4 / 5 with the `3` / `4` / `5` key. The Phase 1 synthetic course is tuned for Par 4 (~185m tee-to-pin) but all three are playable.
 2. **Shot loop** — aim with `a` / `d` (yaw) and `w` / `s` (pitch), pick a club with `1`-`8`, then:
    - Press `Space` once — the power meter starts oscillating 0 → 100% → 0% on a 2.4s triangle wave.

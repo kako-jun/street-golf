@@ -98,7 +98,9 @@ impl RoundState {
     }
 
     /// ショット結果を履歴に追加する。`penalty=true` なら `penalties` も +1。
-    /// ホールインしたなら end_pos 記録後に [`RoundState::finish`] を別途呼ぶ。
+    /// `record_stroke` でストロークを記録した後、ホールインと判定できた
+    /// ときに別途 [`RoundState::finish`] を呼ぶ。phase が `Playing` でない
+    /// 場合は no-op。
     pub fn record_stroke(
         &mut self,
         club: Club,
@@ -178,6 +180,7 @@ pub fn check_hole_out(ball: &BallState, pin: [f64; 3]) -> bool {
 /// ストローク数と Par からスコアラベルを決める。`strokes == 1` は Par に
 /// かかわらず常に "Hole in One"。
 pub fn score_label(strokes: u32, par: u32) -> &'static str {
+    debug_assert!(strokes >= 1, "score_label requires strokes >= 1");
     if strokes == 1 {
         return "Hole in One";
     }
@@ -404,6 +407,36 @@ mod tests {
         assert_eq!(r.strokes, 0);
         assert_eq!(r.penalties, 0);
         assert!(r.stroke_log.is_empty());
+        assert!(!r.holed_out);
+        assert!(r.result.is_none());
+    }
+
+    #[test]
+    fn retry_from_playing_resets_cleanly() {
+        // finish() を経由せず Playing から直接 retry() した場合もきれいに
+        // リセットされることを担保する回帰テスト。
+        let tee = [5.0, 20.0, 20.0];
+        let mut r = RoundState::new(tee);
+        r.select_par(4);
+        r.start_stroke(tee);
+        r.record_stroke(Club::Driver, 0.9, tee, [90.0, 20.0, 0.5], None, true);
+        r.record_stroke(
+            Club::Iron7,
+            0.8,
+            [90.0, 20.0, 0.5],
+            [140.0, 20.0, 0.3],
+            None,
+            false,
+        );
+        assert_eq!(r.strokes, 2);
+        assert_eq!(r.penalties, 1);
+
+        r.retry(tee);
+        assert_eq!(r.phase, RoundPhase::Playing);
+        assert_eq!(r.strokes, 0);
+        assert_eq!(r.penalties, 0);
+        assert_eq!(r.stroke_log.len(), 0);
+        assert_eq!(r.par, 4);
         assert!(!r.holed_out);
         assert!(r.result.is_none());
     }
