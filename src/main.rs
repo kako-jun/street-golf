@@ -342,27 +342,39 @@ fn play_hud(
 }
 
 /// Finished フェーズの HUD 文字列。結果サマリ + ストローク履歴 + 操作案内。
+///
+/// 行数の内訳は厳密に `HEADER_ROWS + log_budget + FOOTER_ROWS == HUD_ROWS`。
+/// 履歴が `log_budget` を超える場合は末尾 1 行を `... (+N more)` 要約で潰し、
+/// フッタ（Retry/Quit 行）は常に確保する。以前は先に履歴を全部積んでから
+/// `truncate(HUD_ROWS)` していたため、長いラウンドでフッタが消え、プレイヤーが
+/// ソフトロック状態に見える不具合があった。
 fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
+    // 行配分: ヘッダ 2 + ログ 5 + フッタ 1 = HUD_ROWS (= 8)。
+    const HEADER_ROWS: usize = 2;
+    const FOOTER_ROWS: usize = 1;
+    let log_budget = HUD_ROWS - HEADER_ROWS - FOOTER_ROWS;
+    debug_assert_eq!(HEADER_ROWS + log_budget + FOOTER_ROWS, HUD_ROWS);
+
     let sign = if result.vs_par > 0 {
         format!("+{}", result.vs_par)
     } else {
         result.vs_par.to_string()
     };
     let line0 = "========== Round Complete ==========".to_string();
-    // フォーマット方針: "Hole in {total} strokes" で打数とペナルティ込みの合計を
-    // 冒頭に出す。スコアラベル (Birdie/Par 等) はストローク数のみで判定し、
-    // カッコ内の vs Par はペナルティ込みの合計と Par の差分なので、両者が
-    // 食い違うケース（例: Birdie (+1)）はペナルティが 1 以上のときに発生する。
-    // フッタの "Label based on strokes only" 行で注記する。
+    // フォーマット方針: "Holed out in {total} (strokes: S + penalties: P)!" で
+    // 合計打数 = 物理ストローク + ペナルティを明示し、"strokes" の曖昧さを消す。
+    // スコアラベル (Birdie/Par 等) はストローク数のみで判定するので、vs Par
+    // （ペナルティ込みの total と Par の差）と Label が食い違うケースがある
+    // （例: Birdie (+1)）。フッタの注記で明示する。
     let line1 = format!(
-        "Hole in {} strokes!  Par {} -> {} ({}) [Penalties: {}, Total: {}]",
-        result.total, result.par, result.label, sign, result.penalties, result.total,
+        "Holed out in {} (strokes: {} + penalties: {})!  Par {} -> {} ({})",
+        result.total, result.strokes, result.penalties, result.par, result.label, sign,
     );
-    // ストローク履歴は最大 5 行まで（それ以上は省略）。
-    let max_log_rows = 5;
-    let mut log_lines: Vec<String> = log
+
+    // ストローク履歴は log_budget 行まで。超える場合は最後 1 行を "... (+N more)"
+    // 要約で置き換える（履歴 log_budget-1 行 + 要約 1 行 = log_budget）。
+    let formatted: Vec<String> = log
         .iter()
-        .take(max_log_rows)
         .map(|s| {
             let spec = s.club.spec();
             let rest = tile_name(s.rest_tile);
@@ -377,9 +389,15 @@ fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
             )
         })
         .collect();
-    if log.len() > max_log_rows {
-        log_lines.push(format!("  ... (+{} more)", log.len() - max_log_rows));
-    }
+    let log_lines: Vec<String> = if formatted.len() <= log_budget {
+        formatted
+    } else {
+        let keep = log_budget - 1;
+        let mut v: Vec<String> = formatted.iter().take(keep).cloned().collect();
+        v.push(format!("  ... (+{} more)", formatted.len() - keep));
+        v
+    };
+
     // Label は strokes のみで判定するため、Penalties 付きの vs Par と Label が
     // 食い違うことがある（例: Birdie (+1)）。プレイヤー向けに注記する。
     let footer =
@@ -389,14 +407,12 @@ fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
     lines.push(line0);
     lines.push(line1);
     lines.extend(log_lines);
-    while lines.len() < HUD_ROWS - 1 {
+    // ログが log_budget 未満の場合は空行でフッタ位置を下げる。
+    while lines.len() < HEADER_ROWS + log_budget {
         lines.push(String::new());
     }
     lines.push(footer);
-    while lines.len() < HUD_ROWS {
-        lines.push(String::new());
-    }
-    lines.truncate(HUD_ROWS);
+    debug_assert_eq!(lines.len(), HUD_ROWS);
     pad_lines(&lines, width)
 }
 

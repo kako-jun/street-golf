@@ -178,9 +178,13 @@ pub fn check_hole_out(ball: &BallState, pin: [f64; 3]) -> bool {
 }
 
 /// ストローク数と Par からスコアラベルを決める。`strokes == 1` は Par に
-/// かかわらず常に "Hole in One"。
+/// かかわらず常に "Hole in One"。`strokes == 0` は API 契約違反だが、
+/// panic せず `(n/a)` を返して公開 API を堅牢にする（呼び出し側の不正入力で
+/// ゲームがクラッシュしない保険）。
 pub fn score_label(strokes: u32, par: u32) -> &'static str {
-    debug_assert!(strokes >= 1, "score_label requires strokes >= 1");
+    if strokes == 0 {
+        return "(n/a)";
+    }
     if strokes == 1 {
         return "Hole in One";
     }
@@ -282,6 +286,15 @@ mod tests {
     fn score_label_over() {
         assert_eq!(score_label(9, 4), "Over");
         assert_eq!(score_label(12, 5), "Over");
+    }
+
+    /// `strokes=0` は API 契約違反だが panic せず `(n/a)` を返すことを確認する。
+    /// 公開 API として呼び出し側の不正入力でクラッシュしないための堅牢化。
+    #[test]
+    fn score_label_zero_strokes_returns_na() {
+        assert_eq!(score_label(0, 3), "(n/a)");
+        assert_eq!(score_label(0, 4), "(n/a)");
+        assert_eq!(score_label(0, 5), "(n/a)");
     }
 
     #[test]
