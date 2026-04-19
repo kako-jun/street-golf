@@ -24,7 +24,9 @@ pub const TILE_ROUGH: TileType = 5;
 pub const TILE_BUNKER: TileType = 6;
 /// グリーン。ホールを最低点とする椀。
 pub const TILE_GREEN: TileType = 7;
-/// ウォーターハザード。Phase 1 では solid 扱い。
+/// ウォーターハザード。`is_solid=true` のためボールは物理的に入れない。
+/// floor 値の `-0.2m` は水面描画用の視覚表現で、Phase 2 でウォーターハザード
+/// 判定（1 打罰）として機能させる予定。
 pub const TILE_WATER: TileType = 8;
 
 const MAP_W: usize = 200;
@@ -32,18 +34,19 @@ const MAP_H: usize = 40;
 const CORNER_W: usize = MAP_W + 1;
 const CORNER_H: usize = MAP_H + 1;
 
-const TEE_X: std::ops::RangeInclusive<i32> = 3..=6;
-const TEE_Y: std::ops::RangeInclusive<i32> = 18..=21;
-const FAIRWAY_X: std::ops::RangeInclusive<i32> = 10..=179;
-const FAIRWAY_Y: std::ops::RangeInclusive<i32> = 15..=24;
-const BUNKER1_X: std::ops::RangeInclusive<i32> = 80..=83;
-const BUNKER1_Y: std::ops::RangeInclusive<i32> = 19..=21;
-const BUNKER2_X: std::ops::RangeInclusive<i32> = 140..=142;
-const BUNKER2_Y: std::ops::RangeInclusive<i32> = 17..=20;
-const WATER_X: std::ops::RangeInclusive<i32> = 105..=109;
-const WATER_Y: std::ops::RangeInclusive<i32> = 17..=21;
-const GREEN_X: std::ops::RangeInclusive<i32> = 180..=194;
-const GREEN_Y: std::ops::RangeInclusive<i32> = 16..=23;
+/// タイル範囲は `(start, end_inclusive)` のタプル。`a..=b` へ展開して使う。
+const TEE_X: (i32, i32) = (3, 6);
+const TEE_Y: (i32, i32) = (18, 21);
+const FAIRWAY_X: (i32, i32) = (10, 179);
+const FAIRWAY_Y: (i32, i32) = (15, 24);
+const BUNKER1_X: (i32, i32) = (80, 83);
+const BUNKER1_Y: (i32, i32) = (19, 21);
+const BUNKER2_X: (i32, i32) = (140, 142);
+const BUNKER2_Y: (i32, i32) = (17, 20);
+const WATER_X: (i32, i32) = (105, 109);
+const WATER_Y: (i32, i32) = (17, 21);
+const GREEN_X: (i32, i32) = (180, 194);
+const GREEN_Y: (i32, i32) = (16, 23);
 
 const TEE_FLOOR_HEIGHT: f64 = 20.0;
 const CEILING_OFFSET: f64 = 3.0;
@@ -52,6 +55,14 @@ const PIN_Y: f64 = 20.5;
 const EYE_HEIGHT: f64 = 0.5;
 
 /// Phase 1 の合成コース。
+///
+/// # グリーンの最低点について
+///
+/// グリーンのコーナー高さは `base_height * 0.3 - 0.3 * exp(-d² / 6)` で、
+/// ピン位置 `(190.5, 20.5)` が椀の中心になるように設計しているが、
+/// `base_height` 側の勾配が残るため、**厳密な最低点は seed により ±0.1m 程度
+/// ピンからずれる**可能性がある。Phase 2 のカップ判定は高さではなく位置距離で
+/// 行う想定なので、この微小ずれは問題にならない。
 pub struct Course {
     seed: u64,
     tiles: Vec<TileType>,
@@ -84,7 +95,11 @@ impl Course {
         self.seed
     }
 
-    /// ピン（ホール）の (x, y) ワールド座標。タイル中心。
+    /// ピン（ホール）の `(x, y)` ワールド座標。
+    ///
+    /// 返り値は世界座標系（1 タイル = 1m）。タイル `(x_int, y_int)` の中心は
+    /// `(x_int + 0.5, y_int + 0.5)` なので、ピンはタイル `(190, 20)` の中心
+    /// `(190.5, 20.5)` に置かれている。
     pub fn pin(&self) -> (f64, f64) {
         (PIN_X, PIN_Y)
     }
@@ -116,27 +131,22 @@ fn build_tiles() -> Vec<TileType> {
         tiles[y * MAP_W + (MAP_W - 1)] = TILE_WALL;
     }
     // フェアウェイ帯
-    paint_rect(&mut tiles, &FAIRWAY_X, &FAIRWAY_Y, TILE_FAIRWAY);
+    paint_rect(&mut tiles, FAIRWAY_X, FAIRWAY_Y, TILE_FAIRWAY);
     // バンカー
-    paint_rect(&mut tiles, &BUNKER1_X, &BUNKER1_Y, TILE_BUNKER);
-    paint_rect(&mut tiles, &BUNKER2_X, &BUNKER2_Y, TILE_BUNKER);
+    paint_rect(&mut tiles, BUNKER1_X, BUNKER1_Y, TILE_BUNKER);
+    paint_rect(&mut tiles, BUNKER2_X, BUNKER2_Y, TILE_BUNKER);
     // ウォーター
-    paint_rect(&mut tiles, &WATER_X, &WATER_Y, TILE_WATER);
+    paint_rect(&mut tiles, WATER_X, WATER_Y, TILE_WATER);
     // グリーン
-    paint_rect(&mut tiles, &GREEN_X, &GREEN_Y, TILE_GREEN);
+    paint_rect(&mut tiles, GREEN_X, GREEN_Y, TILE_GREEN);
     // ティー（フェアウェイより外側、最後に塗って優先）
-    paint_rect(&mut tiles, &TEE_X, &TEE_Y, TILE_TEE);
+    paint_rect(&mut tiles, TEE_X, TEE_Y, TILE_TEE);
     tiles
 }
 
-fn paint_rect(
-    tiles: &mut [TileType],
-    xs: &std::ops::RangeInclusive<i32>,
-    ys: &std::ops::RangeInclusive<i32>,
-    tile: TileType,
-) {
-    for y in ys.clone() {
-        for x in xs.clone() {
+fn paint_rect(tiles: &mut [TileType], xs: (i32, i32), ys: (i32, i32), tile: TileType) {
+    for y in ys.0..=ys.1 {
+        for x in xs.0..=xs.1 {
             if x < 0 || y < 0 || (x as usize) >= MAP_W || (y as usize) >= MAP_H {
                 continue;
             }
@@ -167,7 +177,7 @@ fn tile_priority(tile: TileType) -> u32 {
 }
 
 /// コーナー `(cx, cy)` を代表するタイル種。NW/NE/SW/SE の 4 セルから
-/// 優先度最大のものを返す。
+/// 優先度最大のものを返す。全隣接セルが範囲外の場合のみ [`TILE_WALL`] を返す。
 fn corner_tile(tiles: &[TileType], cx: i32, cy: i32) -> TileType {
     let candidates = [
         tile_of(tiles, cx - 1, cy - 1),
@@ -175,18 +185,14 @@ fn corner_tile(tiles: &[TileType], cx: i32, cy: i32) -> TileType {
         tile_of(tiles, cx - 1, cy),
         tile_of(tiles, cx, cy),
     ];
-    let mut best = TILE_WALL;
-    let mut best_prio = 0u32;
-    let mut any = false;
+    let mut best: Option<(TileType, u32)> = None;
     for c in candidates.into_iter().flatten() {
         let p = tile_priority(c);
-        if !any || p > best_prio {
-            best = c;
-            best_prio = p;
-            any = true;
+        if best.is_none_or(|(_, bp)| p > bp) {
+            best = Some((c, p));
         }
     }
-    if any { best } else { TILE_WALL }
+    best.map(|(t, _)| t).unwrap_or(TILE_WALL)
 }
 
 fn base_height(cx: f64, cy: f64, phase_x: f64, phase_y: f64, amp_scale: f64) -> f64 {
@@ -311,9 +317,10 @@ mod tests {
     #[test]
     fn tee_corners_are_flat_twenty() {
         let c = Course::generate(42);
-        // ティー矩形は x=3..=6, y=18..=21。タイル中心でも、タイル内部コーナー
-        // (x=4..=6, y=19..=21) でも高さ 20.0 のはず。優先順位ルールが効いて
-        // いれば境界コーナー (x=3, y=18 等) もティー扱いで 20.0 になる。
+        // ティー矩形は x=3..=6, y=18..=21。タイルコーナー (cx, cy) で、
+        // タイル内部コーナー (x=4..=6, y=19..=21) でも高さ 20.0 のはず。
+        // 優先順位ルールが効いていれば境界コーナー (x=3, y=18 等) もティー
+        // 扱いで 20.0 になる。
         for cy in 18..=22 {
             for cx in 3..=7 {
                 let idx = corner_index(cx, cy).expect("in range");
@@ -405,5 +412,69 @@ mod tests {
         let c = Course::generate(42);
         let (px, py) = c.pin();
         assert_eq!(c.tile_at(px as i32, py as i32), Some(TILE_GREEN));
+    }
+
+    #[test]
+    fn green_west_edge_has_green_priority() {
+        // グリーンは x=180..=194, y=16..=23。コーナー (180, 20) の 4 近傍は
+        // (179,19)=FAIRWAY, (180,19)=GREEN, (179,20)=FAIRWAY, (180,20)=GREEN。
+        // GREEN priority(60) > FAIRWAY priority(50) なのでコーナーは GREEN 式で
+        // 計算される。期待値は `base_height * 0.3 - 0.3 * exp(-d²/6)`。
+        let c = Course::generate(42);
+        let idx = corner_index(180, 20).expect("in range");
+        let actual = c.corner_floor[idx];
+
+        // 同じ seed の位相を再現して GREEN 式を評価。
+        let mut rng = StdRng::seed_from_u64(42);
+        let phase_x: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let phase_y: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let amp_scale: f64 = rng.random_range(0.8..1.2);
+        let fx = 180.0_f64;
+        let fy = 20.0_f64;
+        let dx = fx - PIN_X;
+        let dy = fy - PIN_Y;
+        let d2 = dx * dx + dy * dy;
+        let expected =
+            base_height(fx, fy, phase_x, phase_y, amp_scale) * 0.3 - 0.3 * (-d2 / 6.0_f64).exp();
+
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "green corner (180,20) should follow GREEN formula, got {actual}, expected {expected}"
+        );
+
+        // さらに FAIRWAY 式（`base_height` そのまま）とは一致しない（priority が効いている証拠）。
+        let fairway_value = base_height(fx, fy, phase_x, phase_y, amp_scale);
+        assert!(
+            (actual - fairway_value).abs() > 1e-6,
+            "green corner should NOT equal fairway formula"
+        );
+    }
+
+    #[test]
+    fn bunker_corner_priority_over_fairway() {
+        // Bunker1 は x=80..=83, y=19..=21。コーナー (80, 20) の 4 近傍は
+        // (79,19)=FAIRWAY, (80,19)=BUNKER, (79,20)=FAIRWAY, (80,20)=BUNKER。
+        // BUNKER priority(80) > FAIRWAY priority(50) なのでバンカー式が適用され、
+        // floor = base_height - 1.5。
+        let c = Course::generate(42);
+        let idx = corner_index(80, 20).expect("in range");
+        let actual = c.corner_floor[idx];
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let phase_x: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let phase_y: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+        let amp_scale: f64 = rng.random_range(0.8..1.2);
+        let fairway_normal = base_height(80.0, 20.0, phase_x, phase_y, amp_scale);
+        let expected_bunker = fairway_normal - 1.5;
+
+        assert!(
+            (actual - expected_bunker).abs() < 1e-9,
+            "bunker corner (80,20) should be base_height - 1.5, got {actual}, expected {expected_bunker}"
+        );
+        // フェアウェイより 1.5m 近く低いはず。
+        assert!(
+            actual < fairway_normal - 1.0,
+            "bunker floor {actual} should be clearly lower than fairway {fairway_normal}"
+        );
     }
 }

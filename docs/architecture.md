@@ -50,7 +50,7 @@ user input ──► shot parameters (club, aim, power)
 | Capability | termray version | Used by |
 |---|---|---|
 | Sloped floors / HeightMap | 0.3.0 | `course.rs` (Phase 1) |
-| Sprites | 0.2.0 | `physics.rs` ↔ renderer glue (Phase 2) |
+| Sprites | 0.2.0 | Phase 1 example (`fly_through` ピン), Phase 2+ 物理 ↔ renderer glue |
 | Text labels above sprites | 0.3.0 | `course.rs` (pin), `hud.rs` (Phase 4) |
 
 All three have already shipped in termray 0.3, so street-golf can depend on a stable release line from Phase 1 onward without patching the upstream engine.

@@ -27,11 +27,11 @@ use crossterm::terminal::{
 };
 
 use street_golf::{
-    Course, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER,
+    Course, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER, step_x, step_y,
 };
 use termray::{
-    Camera, Color, FloorTexturer, Framebuffer, HitSide, Sprite, SpriteArt, SpriteDef, TILE_WALL,
-    TileMap, TileType, WallTexturer, project_sprites, render_floor_ceiling, render_sprites,
+    Camera, Color, FloorTexturer, Framebuffer, HeightMap, HitSide, Sprite, SpriteArt, SpriteDef,
+    TILE_WALL, TileType, WallTexturer, project_sprites, render_floor_ceiling, render_sprites,
     render_walls,
 };
 
@@ -161,32 +161,6 @@ fn present(fb: &Framebuffer, status: &str) -> std::io::Result<()> {
     stdout.flush()
 }
 
-fn step_x(course: &Course, x: f64, y: f64, dx: f64, radius: f64) -> (f64, bool) {
-    if dx == 0.0 {
-        return (x, false);
-    }
-    let nx = x + dx;
-    let probe_x = nx + dx.signum() * radius;
-    if course.is_solid(probe_x.floor() as i32, y.floor() as i32) {
-        (x, true)
-    } else {
-        (nx, false)
-    }
-}
-
-fn step_y(course: &Course, x: f64, y: f64, dy: f64, radius: f64) -> (f64, bool) {
-    if dy == 0.0 {
-        return (y, false);
-    }
-    let ny = y + dy;
-    let probe_y = ny + dy.signum() * radius;
-    if course.is_solid(x.floor() as i32, probe_y.floor() as i32) {
-        (y, true)
-    } else {
-        (ny, false)
-    }
-}
-
 fn main() -> std::io::Result<()> {
     let (cols, rows) = size()?;
     let fb_w = cols as usize;
@@ -287,10 +261,7 @@ fn main() -> std::io::Result<()> {
         let cy = ny.floor() as i32;
         let u = nx - cx as f64;
         let v = ny - cy as f64;
-        let floor_h = {
-            use termray::HeightMap;
-            course.cell_heights(cx, cy).sample_floor(u, v)
-        };
+        let floor_h = course.cell_heights(cx, cy).sample_floor(u, v);
         let new_z = floor_h + 0.5;
 
         let new_yaw = cam.angle + dyaw;

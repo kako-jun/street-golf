@@ -6,6 +6,9 @@
 //! `cargo run --example fly_through` で歩き回れる。以降のフェーズでは
 //! ボール物理（`physics`）、ショット入力（`shot`）、HUD（`hud`）を追加予定。
 
+pub mod collide;
 pub mod course;
 
+pub use collide::{step_x, step_y};
 pub use course::{Course, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER};
+pub use termray::{TILE_EMPTY, TILE_VOID, TILE_WALL};
