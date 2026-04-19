@@ -203,3 +203,55 @@ The 201 × 41 corner grid is shared between adjacent tiles, so each corner is cl
 | [`anyhow`](https://crates.io/crates/anyhow) | 1 | Error propagation in the binary |
 
 The dependency list is deliberately minimal. Phase 5+ will add OSM / SRTM parsers when real-world data import begins.
+
+## Phase 4 — round management
+
+`src/round.rs` ではプレイヤーのラウンドをモデル化する。`Physics` や `ShotState`
+には手を入れず、既存のステートを `RoundState` でラップして進行を追いかける
+スタイルを取った。
+
+### State machine
+
+```
+ ┌──────────────┐  '3'/'4'/'5'  ┌──────────┐  hole out   ┌──────────┐
+ │ ParSelect    │ ────────────► │ Playing  │ ──────────► │ Finished │
+ └──────────────┘               └──────────┘             └──────────┘
+                                     ▲                        │
+                                     │     'Y' (retry)        │
+                                     └────────────────────────┘
+```
+
+- `ParSelect`（開始直後） — `3` / `4` / `5` で Par を選ぶ。`Esc` で終了。
+- `Playing` — Phase 3 のショットループがそのまま回る。加えて Flight → AtRest
+  遷移のタイミングでカップ判定・水ペナルティ判定・ストローク履歴追加を挟む。
+- `Finished` — `Y` でリトライ（Par は維持）、`N` / `Esc` で終了。
+
+### Hole-out check
+
+カップは `Course::pin_world_pos()` で取得した 3D 座標を中心とする円盤で、
+水平距離が `CUP_RADIUS_M = 0.054m` 以下（R&A/USGA 規格 4.25in 直径）**かつ**
+速度が `HOLE_OUT_SPEED_LIMIT = 2.0 m/s` 未満のとき "ホールイン" と判定する。
+2 条件の AND で skim-over（カップを高速で横切る）を除外する。
+
+### Water penalty
+
+水タイル (`TILE_WATER`) で静止した場合は 1 打罰して発射位置
+(`round.last_start_pos`) に `Physics::teleport_ball` でボールを戻す。線速度・
+角速度はゼロ化するのでそのまま次のショット入力に入れる。ホールインして
+いない場合のみ発動する。
+
+### Score label table
+
+| strokes vs par | ラベル |
+|---|---|
+| `strokes == 1`（Par 問わず） | Hole in One |
+| `-3` 以下 | Albatross |
+| `-2` | Eagle |
+| `-1` | Birdie |
+| `0` | Par |
+| `+1` | Bogey |
+| `+2` | Double Bogey |
+| `+3` | Triple Bogey |
+| `+4` 以上 | Over |
+
+`vs_par` は `strokes + penalties - par` で計算する（ペナルティも合算）。

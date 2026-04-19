@@ -104,6 +104,18 @@ impl Course {
         (PIN_X, PIN_Y)
     }
 
+    /// ピン位置の 3D ワールド座標 `[x, y, z]`。Z はピンが属するセルのコーナー
+    /// 高さから bilinear サンプルで取る。ホールアウト判定で使う。
+    pub fn pin_world_pos(&self) -> [f64; 3] {
+        let (px, py) = self.pin();
+        let cx = px.floor() as i32;
+        let cy = py.floor() as i32;
+        let u = px - cx as f64;
+        let v = py - cy as f64;
+        let z = self.cell_heights(cx, cy).sample_floor(u, v);
+        [px, py, z]
+    }
+
     /// ティーから打つときのカメラ初期位置 (x, y, z)。
     /// z はルーフトップ高さ + アイレベル。
     pub fn tee_spawn(&self) -> (f64, f64, f64) {
@@ -405,6 +417,22 @@ mod tests {
         assert!((x - 5.0).abs() < 1e-9);
         assert!((y - 20.0).abs() < 1e-9);
         assert!((z - (TEE_FLOOR_HEIGHT + EYE_HEIGHT)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pin_world_pos_matches_heights() {
+        let c = Course::generate(42);
+        let [px, py, pz] = c.pin_world_pos();
+        assert!((px - PIN_X).abs() < 1e-9);
+        assert!((py - PIN_Y).abs() < 1e-9);
+        // ピンは (190.5, 20.5)。cx=190, cy=20, u=v=0.5。
+        let expected_z = c.cell_heights(190, 20).sample_floor(0.5, 0.5);
+        assert!(
+            (pz - expected_z).abs() < 1e-9,
+            "z={} expected={}",
+            pz,
+            expected_z
+        );
     }
 
     #[test]

@@ -1,9 +1,10 @@
-//! street-golf — Phase 3 のプレイアブルゲームループ。
+//! street-golf — Phase 4 のプレイアブルゲームループ。
 //!
-//! ティーからピンまでの 1 ホールを、クラブ選択 + 狙い + パワーの入力で
-//! 何打かに分けて攻める。crossterm でキー入力を取り、[`ShotState`] と
-//! [`Physics`] を駆動し、termray の半ブロック描画で毎フレームを present する。
-//! ホールアウト判定とスコア確定は Phase 4 (#5) で追加予定。
+//! Par 選択（`ParSelect`）→ ショットループ（`Playing`）→ 結果画面（`Finished`）
+//! の 3 フェーズを crossterm 入力 + [`RoundState`] で駆動する。`Playing` 中の
+//! ショット確定→物理ステップ→追従カメラ→描画→HUD の流れは Phase 3 と同じ
+//! で、加えて at-rest 遷移時にカップ判定と水ペナルティを挟み、ホールイン
+//! すれば `Finished` に進んで最終スコアを表示する。
 
 use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
@@ -21,8 +22,8 @@ use crossterm::terminal::{
 };
 
 use street_golf::{
-    Course, FollowCam, FollowMode, Physics, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH,
-    TILE_TEE, TILE_WATER,
+    Course, FollowCam, FollowMode, Physics, RoundPhase, RoundResult, RoundState, StrokeRecord,
+    TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER, check_hole_out,
     shot::{Club, PITCH_STEP_DEG, ShotPhase, ShotState, YAW_STEP_RAD},
 };
 use termray::{
@@ -39,8 +40,9 @@ const BALL_SPRITE_TYPE: u8 = 2;
 /// `Physics::AT_REST_DURATION` (0.5s) と合わせて、launch から AtRest まで
 /// 最低 1 秒未満は絶対にならない。片方を上げるときはもう片方も再考すること。
 const FLIGHT_REST_HOLD_SEC: f64 = 0.5;
-/// HUD に予約する行数。
-const HUD_ROWS: usize = 3;
+/// HUD と End ダイアログ共通の高さ。End ダイアログが 8 行（ヘッダ + 最大 5
+/// 履歴 + フッタ）を必要とするため、ゲーム中の Playing HUD もそれに合わせる。
+const HUD_ROWS: usize = 8;
 /// メインループのターゲット fps (≈60Hz)。
 const FRAME_SLEEP: Duration = Duration::from_millis(16);
 /// `course.tee_spawn()` が tee 面に足すアイレベル（カメラ視点の高さ）。
@@ -153,54 +155,90 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// 入力ハンドラの返り値。`Launch` は `Physics::launch` を呼ぶタイミング。
+/// 入力ハンドラの返り値（Playing 用）。`Launch` は `Physics::launch` を呼ぶ
+/// タイミング。発射位置を `RoundState::start_stroke` に渡すため呼び出し側
+/// で `ball_state` を参照する。
 #[must_use]
-enum Action {
+enum PlayAction {
     Continue,
     Quit,
     Launch([f64; 3]),
 }
 
-fn handle_key(shot: &mut ShotState, code: KeyCode) -> Action {
+fn handle_play_key(shot: &mut ShotState, code: KeyCode) -> PlayAction {
     // `q` / `e` は将来のスピン入力 (backspin / topspin) に予約。終了は Esc のみ。
     match code {
-        KeyCode::Esc => Action::Quit,
+        KeyCode::Esc => PlayAction::Quit,
         KeyCode::Char(' ') => {
             let launched = shot.press_space();
             if launched {
-                Action::Launch(shot.compute_launch_velocity())
+                PlayAction::Launch(shot.compute_launch_velocity())
             } else {
-                Action::Continue
+                PlayAction::Continue
             }
         }
         KeyCode::Char('a') => {
             shot.adjust_yaw(-YAW_STEP_RAD);
-            Action::Continue
+            PlayAction::Continue
         }
         KeyCode::Char('d') => {
             shot.adjust_yaw(YAW_STEP_RAD);
-            Action::Continue
+            PlayAction::Continue
         }
         KeyCode::Char('w') => {
             shot.adjust_pitch(PITCH_STEP_DEG);
-            Action::Continue
+            PlayAction::Continue
         }
         KeyCode::Char('s') => {
             shot.adjust_pitch(-PITCH_STEP_DEG);
-            Action::Continue
+            PlayAction::Continue
         }
         KeyCode::Char('x') => {
             shot.press_cancel();
-            Action::Continue
+            PlayAction::Continue
         }
         KeyCode::Char(c) => {
+            // '3'..='5' は Par 選択画面でも使うが、Playing 中はクラブ切替として処理される。
             if let Some(club) = Club::from_digit(c) {
                 shot.select_club(club);
             }
-            Action::Continue
+            PlayAction::Continue
         }
-        _ => Action::Continue,
+        _ => PlayAction::Continue,
     }
+}
+
+/// ParSelect フェーズで受け付けるキー。`Some(par)` で Par 確定、`None` で
+/// 入力継続、`Err` で終了要求。
+fn handle_par_select_key(code: KeyCode) -> ParAction {
+    match code {
+        KeyCode::Esc => ParAction::Quit,
+        KeyCode::Char(c @ ('3' | '4' | '5')) => ParAction::Select(c.to_digit(10).unwrap()),
+        _ => ParAction::Continue,
+    }
+}
+
+#[must_use]
+enum ParAction {
+    Continue,
+    Quit,
+    Select(u32),
+}
+
+/// Finished フェーズで受け付けるキー。
+fn handle_end_key(code: KeyCode) -> EndAction {
+    match code {
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => EndAction::Quit,
+        KeyCode::Char('y') | KeyCode::Char('Y') => EndAction::Retry,
+        _ => EndAction::Continue,
+    }
+}
+
+#[must_use]
+enum EndAction {
+    Continue,
+    Quit,
+    Retry,
 }
 
 fn tile_name(tile: Option<TileType>) -> &'static str {
@@ -216,8 +254,27 @@ fn tile_name(tile: Option<TileType>) -> &'static str {
     }
 }
 
-fn hud(
+/// Par 選択画面の HUD 文字列。
+fn par_select_hud(width: usize) -> String {
+    let lines = [
+        "========== street-golf ==========".to_string(),
+        "Course: Phase 1 synthetic (seed 42)".to_string(),
+        "Select par:".to_string(),
+        "  [3] Par 3   (~130m)".to_string(),
+        "  [4] Par 4   (~185m)  <-- recommended".to_string(),
+        "  [5] Par 5   (~220m)".to_string(),
+        "Esc: Quit".to_string(),
+        String::new(),
+    ];
+    pad_lines(&lines, width)
+}
+
+/// Playing フェーズの HUD 文字列。`HUD_ROWS=8` で Par 選択画面 / プレイ中 /
+/// End 画面すべて同じ行数に揃える。Playing は 4 本のコンテンツ行 + 4 本の
+/// パディング、End は最大 5 本のストローク履歴 + ヘッダ + フッタ = 8。
+fn play_hud(
     shot: &ShotState,
+    round: &RoundState,
     ball_pos: [f64; 3],
     ball_vel: [f64; 3],
     course: &Course,
@@ -230,6 +287,11 @@ fn hud(
     let spec = shot.club.spec();
     let yaw_deg = shot.yaw.to_degrees();
     let pitch_deg = shot.effective_pitch_deg();
+    let total = round.strokes + round.penalties;
+    let line0 = format!(
+        "Par {} | Strokes: {} | Penalties: {} | Total: {}",
+        round.par, round.strokes, round.penalties, total,
+    );
     let line1 = format!(
         "Club: {} (loft {:.0}°, max {:.0}m/s) | Shots: {} | Yaw: {:+.1}° Pitch: {:.1}° | Tile: {}",
         spec.label, spec.loft_deg, spec.max_speed_mps, shot.shots, yaw_deg, pitch_deg, tile_label,
@@ -266,8 +328,98 @@ fn hud(
         }
     };
     let line3 = "Keys: 1-8=club  a/d=yaw  w/s=pitch  space=shoot  x=cancel  esc=quit".to_string();
+    let lines = [
+        line0,
+        line1,
+        line2,
+        line3,
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+    ];
+    pad_lines(&lines, width)
+}
+
+/// Finished フェーズの HUD 文字列。結果サマリ + ストローク履歴 + 操作案内。
+///
+/// 行数の内訳は厳密に `HEADER_ROWS + log_budget + FOOTER_ROWS == HUD_ROWS`。
+/// 履歴が `log_budget` を超える場合は末尾 1 行を `... (+N more)` 要約で潰し、
+/// フッタ（Retry/Quit 行）は常に確保する。以前は先に履歴を全部積んでから
+/// `truncate(HUD_ROWS)` していたため、長いラウンドでフッタが消え、プレイヤーが
+/// ソフトロック状態に見える不具合があった。
+fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
+    // 行配分: ヘッダ 2 + ログ 5 + フッタ 1 = HUD_ROWS (= 8)。
+    const HEADER_ROWS: usize = 2;
+    const FOOTER_ROWS: usize = 1;
+    let log_budget = HUD_ROWS - HEADER_ROWS - FOOTER_ROWS;
+    debug_assert_eq!(HEADER_ROWS + log_budget + FOOTER_ROWS, HUD_ROWS);
+
+    let sign = if result.vs_par > 0 {
+        format!("+{}", result.vs_par)
+    } else {
+        result.vs_par.to_string()
+    };
+    let line0 = "========== Round Complete ==========".to_string();
+    // フォーマット方針: "Holed out in {total} (strokes: S + penalties: P)!" で
+    // 合計打数 = 物理ストローク + ペナルティを明示し、"strokes" の曖昧さを消す。
+    // スコアラベル (Birdie/Par 等) はストローク数のみで判定するので、vs Par
+    // （ペナルティ込みの total と Par の差）と Label が食い違うケースがある
+    // （例: Birdie (+1)）。フッタの注記で明示する。
+    let line1 = format!(
+        "Holed out in {} (strokes: {} + penalties: {})!  Par {} -> {} ({})",
+        result.total, result.strokes, result.penalties, result.par, result.label, sign,
+    );
+
+    // ストローク履歴は log_budget 行まで。超える場合は最後 1 行を "... (+N more)"
+    // 要約で置き換える（履歴 log_budget-1 行 + 要約 1 行 = log_budget）。
+    let formatted: Vec<String> = log
+        .iter()
+        .map(|s| {
+            let spec = s.club.spec();
+            let rest = tile_name(s.rest_tile);
+            let pen = if s.penalty { "  [WATER +1]" } else { "" };
+            format!(
+                "  {}: {:<6} power {:>3}%  -> {}{}",
+                s.index,
+                spec.label,
+                (s.power * 100.0).round() as i32,
+                rest,
+                pen,
+            )
+        })
+        .collect();
+    let log_lines: Vec<String> = if formatted.len() <= log_budget {
+        formatted
+    } else {
+        let keep = log_budget - 1;
+        let mut v: Vec<String> = formatted.iter().take(keep).cloned().collect();
+        v.push(format!("  ... (+{} more)", formatted.len() - keep));
+        v
+    };
+
+    // Label は strokes のみで判定するため、Penalties 付きの vs Par と Label が
+    // 食い違うことがある（例: Birdie (+1)）。プレイヤー向けに注記する。
+    let footer =
+        "[Y] Retry  [N/Esc] Quit  (Label based on strokes only; penalties excluded)".to_string();
+
+    let mut lines: Vec<String> = Vec::with_capacity(HUD_ROWS);
+    lines.push(line0);
+    lines.push(line1);
+    lines.extend(log_lines);
+    // ログが log_budget 未満の場合は空行でフッタ位置を下げる。
+    while lines.len() < HEADER_ROWS + log_budget {
+        lines.push(String::new());
+    }
+    lines.push(footer);
+    debug_assert_eq!(lines.len(), HUD_ROWS);
+    pad_lines(&lines, width)
+}
+
+/// 行配列を width で truncate / pad し、`\r\n` で連結する（末尾改行なし）。
+fn pad_lines(lines: &[String], width: usize) -> String {
     let mut out = String::new();
-    for (i, line) in [line1, line2, line3].iter().enumerate() {
+    for (i, line) in lines.iter().enumerate() {
         let mut s = line.clone();
         // HUD 文字列は ASCII 前提。日本語タイル名が混ざる場合は unicode-width を導入すること。
         if s.chars().count() > width {
@@ -279,11 +431,39 @@ fn hud(
             }
         }
         out.push_str(&s);
-        if i + 1 < 3 {
+        if i + 1 < lines.len() {
             out.push_str("\r\n");
         }
     }
     out
+}
+
+/// Finished フェーズ用に framebuffer 中央を薄暗くする（ダイアログ背景）。
+fn dim_center(fb: &mut Framebuffer) {
+    let w = fb.width();
+    let h = fb.height();
+    if w == 0 || h == 0 {
+        return;
+    }
+    let box_w = (w * 6 / 10).min(w);
+    let box_h = (h * 6 / 10).min(h);
+    let x0 = w.saturating_sub(box_w) / 2;
+    let y0 = h.saturating_sub(box_h) / 2;
+    for y in y0..(y0 + box_h).min(h) {
+        for x in x0..(x0 + box_w).min(w) {
+            let p = fb.get_pixel(x, y);
+            // 暗めにブレンド（40% を残す）。
+            fb.set_pixel(
+                x,
+                y,
+                Color::rgb(
+                    (p.r as u32 * 40 / 100) as u8,
+                    (p.g as u32 * 40 / 100) as u8,
+                    (p.b as u32 * 40 / 100) as u8,
+                ),
+            );
+        }
+    }
 }
 
 fn present(fb: &Framebuffer, status: &str) -> std::io::Result<()> {
@@ -338,6 +518,7 @@ fn main() -> Result<()> {
     let mut physics = Physics::new(&course, ball_spawn);
     let mut shot = ShotState::new(0.0);
     let mut follow = FollowCam::new(FollowMode::ShotStanding, 0.0);
+    let mut round = RoundState::new(ball_spawn);
 
     let mut cam = Camera::with_z(tee_x, tee_y, tee_z, 0.0, 70f64.to_radians());
     let mut fb = Framebuffer::new(fb_w, fb_h);
@@ -352,57 +533,127 @@ fn main() -> Result<()> {
         let dt = (now - last).as_secs_f64().min(0.05);
         last = now;
 
+        // --- 入力処理（フェーズ別）---
         while poll(Duration::from_millis(0))? {
             if let Event::Key(key) = read()? {
-                match handle_key(&mut shot, key.code) {
-                    Action::Continue => {}
-                    Action::Quit => return Ok(()),
-                    Action::Launch(v) => {
-                        physics.launch(v);
-                        flight_timer = 0.0;
-                    }
+                match round.phase {
+                    RoundPhase::ParSelect => match handle_par_select_key(key.code) {
+                        ParAction::Continue => {}
+                        ParAction::Quit => return Ok(()),
+                        ParAction::Select(p) => round.select_par(p),
+                    },
+                    RoundPhase::Playing => match handle_play_key(&mut shot, key.code) {
+                        PlayAction::Continue => {}
+                        PlayAction::Quit => return Ok(()),
+                        PlayAction::Launch(v) => {
+                            let ball_now = physics.ball_state();
+                            round.start_stroke(ball_now.pos);
+                            physics.launch(v);
+                            flight_timer = 0.0;
+                        }
+                    },
+                    RoundPhase::Finished => match handle_end_key(key.code) {
+                        EndAction::Continue => {}
+                        EndAction::Quit => return Ok(()),
+                        EndAction::Retry => {
+                            physics = Physics::new(&course, ball_spawn);
+                            shot = ShotState::new(0.0);
+                            // shot.yaw も 0.0 に戻るので yaw 0.0 を渡して問題ない。
+                            follow = FollowCam::new(FollowMode::ShotStanding, 0.0);
+                            round.retry(ball_spawn);
+                            flight_timer = 0.0;
+                        }
+                    },
                 }
             }
         }
 
+        // --- 物理・状態更新 ---
         shot.tick(dt);
-        physics.step(dt);
-
-        let ball = physics.ball_state();
-        if shot.phase == ShotPhase::Flight {
-            flight_timer += dt;
-            if ball.at_rest && flight_timer > FLIGHT_REST_HOLD_SEC {
-                shot.notify_rest();
-                flight_timer = 0.0;
-            }
+        // Finished はボールが完全停止しているので物理ステップをスキップする。
+        // ball_state() は状態を読むだけなのでカメラ追従は引き続き機能する。
+        if !matches!(round.phase, RoundPhase::Finished) {
+            physics.step(dt);
         }
 
+        let ball = physics.ball_state();
+
+        // Flight → AtRest 遷移時にカップ判定 + 水ペナルティ + 履歴記録。
+        if shot.phase == ShotPhase::Flight {
+            flight_timer += dt;
+        }
+        if round.phase == RoundPhase::Playing
+            && shot.phase == ShotPhase::Flight
+            && ball.at_rest
+            && flight_timer > FLIGHT_REST_HOLD_SEC
+        {
+            let pin = course.pin_world_pos();
+            let holed = check_hole_out(&ball, pin);
+            let tile = course.tile_at(ball.pos[0].floor() as i32, ball.pos[1].floor() as i32);
+            let penalty = !holed && tile == Some(TILE_WATER);
+            round.record_stroke(
+                shot.club,
+                shot.power,
+                round.last_start_pos,
+                ball.pos,
+                tile,
+                penalty,
+            );
+            if holed {
+                round.finish();
+            } else if penalty {
+                physics.teleport_ball(round.last_start_pos);
+            }
+            shot.notify_rest();
+            flight_timer = 0.0;
+        }
+
+        // --- カメラ更新 ---
         follow.yaw = shot.yaw;
         let (ccx, ccy, ccz, cyaw, cpitch) = follow.update(ball.pos);
         cam.set_pose(ccx, ccy, cyaw);
         cam.set_z(ccz);
         cam.set_pitch(cpitch);
 
+        // --- 描画 ---
         fb.clear(Color::default());
         let rays = cam.cast_all_rays(&course, fb_w, MAX_DISTANCE);
         render_floor_ceiling(&mut fb, &rays, &scene, &course, &cam, MAX_DISTANCE);
         render_walls(&mut fb, &rays, &scene, &course, &cam, MAX_DISTANCE);
-        let sprites = [
-            Sprite {
-                x: pin_x,
-                y: pin_y,
-                sprite_type: PIN_SPRITE_TYPE,
-            },
-            Sprite {
+        // ホールアウト後はボールを消す（カップに落ちた演出）。
+        let mut sprites: Vec<Sprite> = Vec::with_capacity(2);
+        sprites.push(Sprite {
+            x: pin_x,
+            y: pin_y,
+            sprite_type: PIN_SPRITE_TYPE,
+        });
+        if !round.holed_out {
+            sprites.push(Sprite {
                 x: ball.pos[0],
                 y: ball.pos[1],
                 sprite_type: BALL_SPRITE_TYPE,
-            },
-        ];
+            });
+        }
         let projected = project_sprites(&sprites, &cam, &course, fb_w, fb_h);
         render_sprites(&mut fb, &projected, &rays, &art, MAX_DISTANCE);
 
-        present(&fb, &hud(&shot, ball.pos, ball.vel, &course, fb_w))?;
+        // Finished フェーズはダイアログ背景として中央を暗くする。
+        if round.phase == RoundPhase::Finished {
+            dim_center(&mut fb);
+        }
+
+        // --- HUD / ステータス ---
+        let status = match round.phase {
+            RoundPhase::ParSelect => par_select_hud(fb_w),
+            RoundPhase::Playing => play_hud(&shot, &round, ball.pos, ball.vel, &course, fb_w),
+            RoundPhase::Finished => {
+                // result は finish() で必ず埋まっている。
+                let result = round.result.as_ref().expect("result after finish");
+                end_hud(result, &round.stroke_log, fb_w)
+            }
+        };
+
+        present(&fb, &status)?;
         std::thread::sleep(FRAME_SLEEP);
     }
 }

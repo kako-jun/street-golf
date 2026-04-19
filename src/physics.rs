@@ -170,6 +170,20 @@ impl Physics {
         );
         self.at_rest_timer = 0.0;
     }
+
+    /// ボールを指定位置にテレポートし、線形・角速度をゼロ化する。
+    /// 停止タイマーもリセットするので、直後のフレームから自然にステップを
+    /// 再開できる。水ペナルティ（1打罰して発射位置に戻す）やリトライで使う。
+    pub fn teleport_ball(&mut self, pos: [f64; 3]) {
+        let body = &mut self.bodies[self.ball_handle];
+        body.set_translation(
+            Vector::new(pos[0] as f32, pos[1] as f32, pos[2] as f32),
+            true,
+        );
+        body.set_linvel(Vector::new(0.0, 0.0, 0.0), true);
+        body.set_angvel(Vector::new(0.0, 0.0, 0.0), true);
+        self.at_rest_timer = 0.0;
+    }
 }
 
 /// タイル種ごとの (friction, restitution) ペア。
@@ -343,6 +357,30 @@ mod tests {
             elapsed
         );
         assert!(phys.time_accumulator < FIXED_DT);
+    }
+
+    #[test]
+    fn teleport_ball_moves_and_zeroes_velocity() {
+        let course = Course::generate(42);
+        let mut phys = Physics::new(&course, [5.5, 20.0, 20.5]);
+        // 少し落下させて速度を持たせる。
+        phys.step(0.1);
+        let before = phys.ball_state();
+        assert!(
+            before.vel[2] < 0.0,
+            "ball should be falling, vz={}",
+            before.vel[2]
+        );
+
+        phys.teleport_ball([10.0, 10.0, 30.0]);
+        let after = phys.ball_state();
+        assert!((after.pos[0] - 10.0).abs() < 1e-4, "pos.x={}", after.pos[0]);
+        assert!((after.pos[1] - 10.0).abs() < 1e-4, "pos.y={}", after.pos[1]);
+        assert!((after.pos[2] - 30.0).abs() < 1e-4, "pos.z={}", after.pos[2]);
+        assert!(after.vel[0].abs() < 1e-6);
+        assert!(after.vel[1].abs() < 1e-6);
+        assert!(after.vel[2].abs() < 1e-6);
+        assert!(!after.at_rest, "at_rest timer should be reset");
     }
 
     #[test]

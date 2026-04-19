@@ -13,7 +13,7 @@ Single-crate binary depending on the external [`termray`](https://github.com/kak
 - `src/course.rs` (Phase 1 — 実装済) — `Course`: implements `termray::TileMap` + `termray::HeightMap`. Hand-drawn 200×40 layout with tee / fairway / rough / bunkers / water / green + pin. Per-corner floor heights are precomputed with a seed-derived low-frequency noise base, a flat 20m rooftop tee, a water surface at -0.2m (solid), and a green bowl centered on the pin.
 - `src/physics.rs` (Phase 2) — rapier3d rigid-body world, ball state, course collider generation, step-and-sample integration
 - `src/shot.rs` (Phase 3 — 実装済) — `ShotState` ステートマシン (`Aiming` / `PowerSwinging` / `Flight` / `AtRest`)、`Club` / `ClubSpec` テーブル、自己振動するパワーメーター、launch 速度計算。純粋ロジックでユニットテストのみ
-- `src/hud.rs` (Phase 4) — score card, club picker, wind / distance / lie indicators
+- `src/round.rs` (Phase 4 — 実装済) — `RoundState` ステートマシン (`ParSelect` / `Playing` / `Finished`)、`check_hole_out` 判定（カップ半径 + 速度上限）、`score_label`、ストローク履歴 `StrokeRecord`、集計 `RoundResult`。Par 選択 / 水ペナルティ / リトライを含む。純粋ロジック
 
 termray (external) owns raycasting: DDA walls, per-column ray-floor intersection, sprite and label projection. street-golf injects golf semantics (course surface heights, ball sprite, hole pin label) into termray through its trait-based hooks, while rapier3d owns the ball's trajectory and the camera rides along.
 
@@ -27,18 +27,21 @@ cargo fmt --all
 
 ## Current phase
 
-Phase 3 — shot input + swing sequence. `src/shot.rs` introduces `ShotState` として `Aiming → PowerSwinging → Flight → AtRest` の 4 ステート機を純粋ロジックで持つ。パワーメーターは `PowerSwinging` 中に 0→1→0 の三角波で自己振動し、Space 2 回押し（開始・停止）で値を確定する方式（crossterm の KeyRelease はポータブルに取れないため press/release 方式を避けた）。`Club` は Driver / 3I / 5I / 7I / 9I / PW / SW / Putter の 8 本を用意し `'1'..='8'` キーで切り替える。`src/main.rs` は Phase 0 スプラッシュを捨て、`Physics` + `FollowCam` + termray を駆動するフルゲームループに置き換わった。`cargo run --release` でティーからピンまで実際に何打か打って到達できる。ホールアウト判定・スコア確定は Phase 4 (#5) に続く。
+Phase 4 — ホールアウト判定 + スコアカード + ラウンド終了。MVP v0.1.0 としての遊び切れる 1 ホールが完成した。`src/round.rs` に `RoundState` を追加し、`ParSelect → Playing → Finished` の 3 ステートで進行管理する。起動直後に Par 3 / 4 / 5 を選び、`Playing` フェーズで Phase 3 のショットループが回る。ボールが静止するたびにカップ判定（半径 5.4cm 以内 **かつ** 速度 2m/s 未満）と水ペナルティ判定（`TILE_WATER` で静止 → +1 打 + 発射位置に復帰）を挟み、ホールインすれば `Finished` に遷移して最終スコア（Hole in One / Albatross / Eagle / Birdie / Par / Bogey / …）とストローク履歴を表示する。`Y` でリトライ（Par は維持）、`N` / `Esc` で終了。`examples/shot_test.rs` は Phase 2 の物理検証用ハーネスとして据え置き。
 
 ### 操作キー
 
-| キー | 効果 |
-|---|---|
-| `1`-`8` | クラブ選択（Driver / 3I / 5I / 7I / 9I / PW / SW / Putter） |
-| `a` / `d` | yaw（水平方向）を ±約 2° |
-| `w` / `s` | pitch（打ち出し角）を ±2°（0°-45° クランプ） |
-| `Space` | Aiming→PowerSwinging→Flight、AtRest→Aiming |
-| `x` | PowerSwinging→Aiming（スイングをキャンセル） |
-| `Esc` | 終了 |
+| キー | フェーズ | 効果 |
+|---|---|---|
+| `3` / `4` / `5` | ParSelect | Par 3 / 4 / 5 を選んで Playing に遷移 |
+| `1`-`8` | Playing | クラブ選択（Driver / 3I / 5I / 7I / 9I / PW / SW / Putter） |
+| `a` / `d` | Playing | yaw（水平方向）を ±約 2° |
+| `w` / `s` | Playing | pitch（打ち出し角）を ±2°（0°-45° クランプ） |
+| `Space` | Playing | Aiming→PowerSwinging→Flight、AtRest→Aiming |
+| `x` | Playing | PowerSwinging→Aiming（スイングをキャンセル） |
+| `Y` | Finished | 同じ Par でリトライ |
+| `N` | Finished | 終了 |
+| `Esc` | 全フェーズ | 終了 |
 
 ## Roadmap
 
