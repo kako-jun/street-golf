@@ -7,7 +7,6 @@
 use std::io::{Write, stdout};
 
 use crossterm::cursor::{Hide, Show};
-use crossterm::execute;
 use crossterm::style::{
     Color as CtColor, Print, ResetColor, SetBackgroundColor, SetForegroundColor,
 };
@@ -15,6 +14,7 @@ use crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
     enable_raw_mode, size,
 };
+use crossterm::{execute, queue};
 use termray::{Color, Framebuffer};
 
 /// RAII guard that enters the alternate screen in raw mode on construction
@@ -75,7 +75,7 @@ fn render_frame(fb: &Framebuffer) -> anyhow::Result<()> {
         for x in 0..fb.width() {
             let top = fb.get_pixel(x, y);
             let bot = fb.get_pixel(x, (y + 1).min(height - 1));
-            execute!(
+            queue!(
                 out,
                 SetForegroundColor(CtColor::Rgb {
                     r: top.r,
@@ -90,7 +90,7 @@ fn render_frame(fb: &Framebuffer) -> anyhow::Result<()> {
                 Print("\u{2580}"),
             )?;
         }
-        execute!(out, ResetColor, Print("\r\n"))?;
+        queue!(out, ResetColor, Print("\r\n"))?;
     }
     out.flush()?;
     Ok(())
