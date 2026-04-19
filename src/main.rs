@@ -33,13 +33,20 @@ use termray::{
 const MAX_DISTANCE: f64 = 60.0;
 const PIN_SPRITE_TYPE: u8 = 1;
 const BALL_SPRITE_TYPE: u8 = 2;
-/// Flight 開始直後は `Physics` 側の at_rest タイマーが立ち上がる前なので、
-/// このホールド時間を過ぎるまでは rest 判定を信用しない。
+/// Flight 開始直後は `at_rest=true` が 1 フレームだけ立つことがあるので、
+/// launch からこの秒数は `notify_rest` を抑制する（発射直後の
+/// 速度ランプアップ中に誤判定で AtRest に落ちるのを防ぐ）。
+/// `Physics::AT_REST_DURATION` (0.5s) と合わせて、launch から AtRest まで
+/// 最低 1 秒未満は絶対にならない。片方を上げるときはもう片方も再考すること。
 const FLIGHT_REST_HOLD_SEC: f64 = 0.5;
 /// HUD に予約する行数。
 const HUD_ROWS: usize = 3;
 /// メインループのターゲット fps (≈60Hz)。
 const FRAME_SLEEP: Duration = Duration::from_millis(16);
+/// `course.tee_spawn()` が tee 面に足すアイレベル（カメラ視点の高さ）。
+const TEE_EYE_HEIGHT: f64 = 0.5;
+/// ボールを tee 面から何 m 上にスポーンさせるか。
+const BALL_DROP_HEIGHT: f64 = 0.3;
 
 struct CourseScene<'a> {
     course: &'a Course,
@@ -147,6 +154,7 @@ impl Drop for TerminalGuard {
 }
 
 /// 入力ハンドラの返り値。`Launch` は `Physics::launch` を呼ぶタイミング。
+#[must_use]
 enum Action {
     Continue,
     Quit,
@@ -154,12 +162,9 @@ enum Action {
 }
 
 fn handle_key(shot: &mut ShotState, code: KeyCode) -> Action {
+    // `q` / `e` は将来のスピン入力 (backspin / topspin) に予約。終了は Esc のみ。
     match code {
         KeyCode::Esc => Action::Quit,
-        KeyCode::Char('q') if shot.phase == ShotPhase::Aiming => {
-            // Aiming 中の 'q' は終了ショートカット。将来 spin を割り当てるまでの暫定措置。
-            Action::Quit
-        }
         KeyCode::Char(' ') => {
             let launched = shot.press_space();
             if launched {
@@ -182,6 +187,10 @@ fn handle_key(shot: &mut ShotState, code: KeyCode) -> Action {
         }
         KeyCode::Char('s') => {
             shot.adjust_pitch(-PITCH_STEP_DEG);
+            Action::Continue
+        }
+        KeyCode::Char('x') => {
+            shot.press_cancel();
             Action::Continue
         }
         KeyCode::Char(c) => {
@@ -256,10 +265,11 @@ fn hud(
             )
         }
     };
-    let line3 = "Keys: 1-8=club  a/d=yaw  w/s=pitch  space=shoot  esc=quit".to_string();
+    let line3 = "Keys: 1-8=club  a/d=yaw  w/s=pitch  space=shoot  x=cancel  esc=quit".to_string();
     let mut out = String::new();
     for (i, line) in [line1, line2, line3].iter().enumerate() {
         let mut s = line.clone();
+        // HUD 文字列は ASCII 前提。日本語タイル名が混ざる場合は unicode-width を導入すること。
         if s.chars().count() > width {
             s = s.chars().take(width).collect();
         } else {
@@ -318,7 +328,12 @@ fn main() -> Result<()> {
 
     let (tee_x, tee_y, tee_z) = course.tee_spawn();
     let (pin_x, pin_y) = course.pin();
-    let ball_spawn = [tee_x + 0.5, tee_y, tee_z - 0.5 + 0.3];
+    // tee_z からアイレベル分を引いて足元に戻し、そこから BALL_DROP_HEIGHT だけ上に置く。
+    let ball_spawn = [
+        tee_x + 0.5,
+        tee_y,
+        tee_z - TEE_EYE_HEIGHT + BALL_DROP_HEIGHT,
+    ];
 
     let mut physics = Physics::new(&course, ball_spawn);
     let mut shot = ShotState::new(0.0);

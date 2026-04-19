@@ -184,6 +184,16 @@ impl ShotState {
         }
     }
 
+    /// PowerSwinging 中に呼ぶと Aiming に戻し、パワー値をリセットする。
+    /// 他フェーズでは何もしない（Flight 中にキャンセルは物理的に無理なので）。
+    pub fn press_cancel(&mut self) {
+        if self.phase == ShotPhase::PowerSwinging {
+            self.phase = ShotPhase::Aiming;
+            self.power = 0.0;
+            self.power_t = 0.0;
+        }
+    }
+
     /// 物理側でボールが静止したら呼ぶ。`Flight` からのみ `AtRest` に遷移する。
     pub fn notify_rest(&mut self) {
         if self.phase == ShotPhase::Flight {
@@ -193,6 +203,9 @@ impl ShotState {
 
     /// 現在の狙い・クラブ・パワーから launch 速度ベクトルを計算する。
     /// `v = speed * (cos(pitch)cos(yaw), cos(pitch)sin(yaw), sin(pitch))`。
+    ///
+    /// `[vx, vy, vz]` を返す。座標系は termray / `Course` と同じ Z-up・+X 方向を
+    /// 0 yaw とする。`pitch_deg` は水平面から上向きへの迎角（0°..=45°）。
     pub fn compute_launch_velocity(&self) -> [f64; 3] {
         let speed = self.club.spec().max_speed_mps * self.power;
         let pitch = self.effective_pitch_deg().to_radians();
@@ -215,7 +228,10 @@ impl ShotState {
 
     pub fn adjust_yaw(&mut self, delta_rad: f64) {
         if self.phase == ShotPhase::Aiming {
-            self.yaw += delta_rad;
+            let raw = self.yaw + delta_rad;
+            // [-π, π] に正規化（長時間プレイで HUD に ±1234° が出ないように）。
+            self.yaw = (raw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+                - std::f64::consts::PI;
         }
     }
 
@@ -407,6 +423,43 @@ mod tests {
         s.press_space(); // → Flight
         s.notify_rest();
         assert_eq!(s.phase, ShotPhase::AtRest);
+    }
+
+    #[test]
+    fn yaw_wraps_to_normalized_range() {
+        let mut s = ShotState::new(0.0);
+        // 10 周分（= 20π rad）を少しずつ加算。各呼び出しの後も正規化される。
+        let step = std::f64::consts::TAU / 8.0;
+        for _ in 0..(10 * 8) {
+            s.adjust_yaw(step);
+        }
+        assert!(
+            s.yaw.abs() <= std::f64::consts::PI + 1e-9,
+            "yaw should stay in [-π, π], got {}",
+            s.yaw
+        );
+    }
+
+    #[test]
+    fn press_cancel_returns_powerswinging_to_aiming() {
+        let mut s = ShotState::new(0.0);
+        s.press_space();
+        assert_eq!(s.phase, ShotPhase::PowerSwinging);
+        s.tick(POWER_HALF_SEC * 0.5);
+        assert!(s.power > 0.0);
+        s.press_cancel();
+        assert_eq!(s.phase, ShotPhase::Aiming);
+        assert_eq!(s.power, 0.0);
+        assert_eq!(s.power_t, 0.0);
+        // Aiming では press_cancel は no-op。
+        s.press_cancel();
+        assert_eq!(s.phase, ShotPhase::Aiming);
+        // Flight では press_cancel は no-op（物理的にキャンセル不能）。
+        s.press_space();
+        s.press_space(); // → Flight
+        assert_eq!(s.phase, ShotPhase::Flight);
+        s.press_cancel();
+        assert_eq!(s.phase, ShotPhase::Flight);
     }
 
     #[test]

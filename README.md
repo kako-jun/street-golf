@@ -30,6 +30,7 @@ cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics 
 | `a` / `d` | Yaw left / right (~2°) |
 | `w` / `s` | Pitch up / down (0°-45°) |
 | `Space` | Aim → start swing → release → (after rest) back to aim |
+| `x` | Cancel the current swing (PowerSwinging → Aiming) |
 | `Esc` | Quit |
 
 The power meter auto-oscillates from 0% to 100% and back. Press `Space` once to start the swing and a second time to release — whichever power value is displayed at that instant is the shot's strength.
