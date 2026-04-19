@@ -1,0 +1,25 @@
+[package]
+name = "street-golf"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+authors = ["kako-jun"]
+license = "MIT"
+description = "TUI street golf game powered by termray and rapier3d"
+homepage = "https://github.com/kako-jun/street-golf"
+repository = "https://github.com/kako-jun/street-golf"
+readme = "README.md"
+keywords = ["golf", "game", "tui", "raycasting", "terminal"]
+categories = ["command-line-utilities", "games"]
+exclude = [".github/", ".vscode/", "docs/", "CLAUDE.md", "target/"]
+
+[dependencies]
+termray = "0.3"
+rapier3d = "0.32"
+crossterm = "0.29"
+rand = "0.9"
+anyhow = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1

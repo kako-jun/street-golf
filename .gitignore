@@ -1,0 +1,6 @@
+/target
+.serena/
+.mcp.json
+.DS_Store
+.idea/
+.vscode/
