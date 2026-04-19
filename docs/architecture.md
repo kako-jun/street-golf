@@ -79,19 +79,52 @@ Phase 1 (#2)  Course heightmap ───┬┘
 - **Phase 4** adds `hud.rs`: score card, club indicator, hole-out detection, round end.
 - **Phase 5+** replaces the synthetic course with real-world data pulled from OpenStreetMap (geometry) and SRTM (elevation).
 
-## Current state (Phase 0)
+## Current state (Phase 1)
 
-`src/main.rs` currently:
+`src/course.rs` now defines `Course` — a synthetic 1-hole course that implements both `termray::TileMap` and `termray::HeightMap`. `examples/fly_through.rs` drives it as an interactive walkthrough so the terrain can be verified visually before Phase 2 introduces ball physics.
 
-1. Reads terminal size via `crossterm::terminal::size`.
-2. Allocates a `termray::Framebuffer` at full terminal width × 2×(rows−2) pixels (half-block rendering doubles vertical resolution).
-3. Clears it to a dark meadow green.
-4. Enters the alternate screen, hides the cursor, enables raw mode.
-5. Writes one frame using half-block characters (`▀`): top pixel → foreground RGB, bottom pixel → background RGB.
-6. Sleeps ~800 ms so the user can see the blank frame.
-7. Restores the terminal and exits.
+`src/main.rs` still runs the Phase 0 splash and stays that way until Phase 2. The Phase 1 entry point is the example:
 
-There is no course, no ball, no input handling yet — those arrive with the phases above.
+```bash
+cargo run --release --example fly_through
+```
+
+### Map layout
+
+World coordinates: 1 tile = 1m. Map is 200 × 40 tiles; world origin `(0, 0)` is the NW corner, `y` increases southward.
+
+| Region | Tile | Extent (inclusive) | Surface height |
+|---|---|---|---|
+| Outer border | `TILE_WALL` (1) | x ∈ {0, 199} ∪ y ∈ {0, 39} | 0.0m (not rendered from inside) |
+| Tee | `TILE_TEE` (3) | x=3..6, y=18..21 | flat 20.0m rooftop |
+| Fairway | `TILE_FAIRWAY` (4) | x=10..179, y=15..24 | `base_height` (±0.4m) |
+| Rough | `TILE_ROUGH` (5) | fill elsewhere inside the border | `base_height` (±0.4m) |
+| Bunker 1 | `TILE_BUNKER` (6) | x=80..83, y=19..21 | `base_height − 1.5m` |
+| Bunker 2 | `TILE_BUNKER` (6) | x=140..142, y=17..20 | `base_height − 1.5m` |
+| Water | `TILE_WATER` (8) | x=105..109, y=17..21 | −0.2m, **solid** |
+| Green | `TILE_GREEN` (7) | x=180..194, y=16..23 | `base_height * 0.3 − 0.3 * exp(−d² / 6.0)` where `d` = distance to pin |
+| Pin (sprite) | — | `(190.5, 20.5)` | — |
+| Tee spawn (camera) | — | `(5.0, 20.0, 20.5)` | z = rooftop + 0.5m eye |
+
+`base_height(cx, cy) = 0.4 * amp_scale * (0.6 * sin(0.07·cx + phase_x) + 0.4 * sin(0.11·cy + phase_y))`, where `phase_x`, `phase_y`, `amp_scale` are sampled from `StdRng::seed_from_u64(seed)`. `Course::generate(seed)` is deterministic — same seed always yields identical per-corner height arrays.
+
+### Corner priority
+
+The 201 × 41 corner grid is shared between adjacent tiles, so each corner is classified by **the highest-priority tile among its four neighboring cells** (NW / NE / SW / SE). Priority (highest first):
+
+1. `TILE_WALL` — forces `floor = 0.0`
+2. `TILE_TEE` — forces `floor = 20.0` (guarantees the 4×4 tee is strictly flat)
+3. `TILE_BUNKER`
+4. `TILE_WATER`
+5. `TILE_GREEN`
+6. `TILE_FAIRWAY`
+7. `TILE_ROUGH`
+
+`ceil[corner] = floor[corner] + 3.0m` everywhere.
+
+### is_solid contract
+
+`TILE_WALL`, `TILE_VOID`, and `TILE_WATER` are solid. Out-of-bounds tiles return `true` (per `TileMap` contract). Tee / fairway / rough / bunker / green are walkable.
 
 ## External dependencies
 
