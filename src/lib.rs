@@ -1,7 +1,11 @@
 //! street-golf — TUI street golf game powered by termray and rapier3d.
 //!
-//! Phase 0 skeleton: this crate currently only exposes a placeholder. Later
-//! phases will add the course builder (`course`), ball physics (`physics`),
-//! shot input (`shot`), and heads-up display (`hud`). The binary entry point
-//! lives in `src/main.rs` and deliberately avoids pulling in higher-level APIs
-//! until they exist.
+//! Phase 1 ではコース定義（[`course`]）を導入する。ティー・フェアウェイ・
+//! バンカー・ウォーターハザード・グリーン・ピンをレイアウトした 200m × 40m の
+//! 合成コースを [`termray::TileMap`] / [`termray::HeightMap`] として公開し、
+//! `cargo run --example fly_through` で歩き回れる。以降のフェーズでは
+//! ボール物理（`physics`）、ショット入力（`shot`）、HUD（`hud`）を追加予定。
+
+pub mod course;
+
+pub use course::{Course, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER};
