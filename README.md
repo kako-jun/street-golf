@@ -2,7 +2,7 @@
 
 TUI street golf — tee off from a rooftop, land on the street, keep playing until you hole out.
 
-> **Status**: Pre-alpha. Phase 2 wires rapier3d ball physics into the termray view. Shot input and scoring still land in later phases.
+> **Status**: Pre-alpha. Phase 3 adds the playable shot loop — aim, choose a club, time the power meter, and watch the ball fly until it rests. Scoring and hole-out still land in Phase 4.
 
 ## Stack
 
@@ -15,12 +15,25 @@ TUI street golf — tee off from a rooftop, land on the street, keep playing unt
 
 ```bash
 cargo build --release
-./target/release/street-golf
-cargo run --release --example fly_through   # Phase 1 walk-through of the synthetic course
-cargo run --release --example shot_test     # Phase 2 hardcoded 1-shot physics demo
+cargo run --release                          # Phase 3 playable shot loop (main binary)
+cargo run --release --example fly_through    # Phase 1 walk-through of the synthetic course
+cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics verification
 ```
 
-The Phase 0 binary still clears the terminal to a dark meadow green for about 0.8 seconds and exits. The Phase 1 `fly_through` example lets you stroll the 200×40 synthetic course. The Phase 2 `shot_test` example fires a preset shot at 0.5s and lets you watch the ball fly, land, roll, and come to rest under rapier3d, with a third-person ShotStanding follow camera.
+`cargo run --release` now launches the playable game: you tee off from the rooftop, pick a club, aim, and time the power meter to hit the ball toward the pin. The `fly_through` example still walks the 200×40 synthetic course; the `shot_test` example remains a hardcoded launch verification harness for the physics pipeline.
+
+### Controls
+
+| Key | Effect |
+|---|---|
+| `1`-`8` | Club: Driver / 3I / 5I / 7I / 9I / PW / SW / Putter |
+| `a` / `d` | Yaw left / right (~2°) |
+| `w` / `s` | Pitch up / down (0°-45°) |
+| `Space` | Aim → start swing → release → (after rest) back to aim |
+| `x` | Cancel the current swing (PowerSwinging → Aiming) |
+| `Esc` | Quit |
+
+The power meter auto-oscillates from 0% to 100% and back. Press `Space` once to start the swing and a second time to release — whichever power value is displayed at that instant is the shot's strength.
 
 ## Roadmap
 

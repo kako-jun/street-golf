@@ -7,6 +7,16 @@ All notable changes to street-golf are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- Phase 3 shot input + swing sequence
+  ([#4](https://github.com/kako-jun/street-golf/issues/4)).
+  `src/shot.rs` introduces the pure-logic `ShotState` machine with four phases
+  (`Aiming` → `PowerSwinging` → `Flight` → `AtRest`), the 8-club `Club` /
+  `ClubSpec` table (Driver / 3I / 5I / 7I / 9I / PW / SW / Putter), and a
+  self-oscillating triangle-wave power meter (Space to start and stop, since
+  crossterm's `KeyRelease` is not portable). 16 unit tests cover the
+  oscillator, velocity formula, state transitions, club-switch /
+  loft-override behaviour, yaw wrap-around, and swing cancel (`x`).
+
 - Phase 2 rapier3d ball physics + follow camera
   ([#3](https://github.com/kako-jun/street-golf/issues/3)).
   `src/physics.rs` wraps a rapier3d 0.32 world with per-tile-type TriMesh
@@ -36,3 +46,11 @@ All notable changes to street-golf are documented in this file. The format is ba
   to `main` and every PR) and `release.yml` (five target binaries — linux x86_64 /
   aarch64, macOS x86_64 / aarch64, windows x86_64 — on `v*` tags, uploaded via
   `softprops/action-gh-release@v2`).
+
+### Changed
+- `src/main.rs` replaces the Phase 0 800ms splash with the full Phase 3 game
+  loop: input → state tick → physics step → camera update → render → HUD.
+  `cargo run --release` is now the playable binary.
+
+### Notes
+- `examples/shot_test.rs` は Phase 2 のハードコード発射検証として据え置き。`ShotState` とは独立。
