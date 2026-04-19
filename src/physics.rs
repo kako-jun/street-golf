@@ -19,11 +19,15 @@ const MAP_W: i32 = 200;
 const MAP_H: i32 = 40;
 const FIXED_DT: f64 = 1.0 / 60.0;
 const BALL_RADIUS: f64 = 0.021;
+// R&A/USGA 規格: ゴルフボールは 45.93g 以下。46g を丸めて採用。
 const BALL_MASS: f64 = 0.046;
 const AT_REST_LINVEL: f64 = 0.05;
 const AT_REST_ANGVEL: f64 = 0.1;
 const AT_REST_DURATION: f64 = 0.5;
 const WALL_CEILING_HALF: f64 = 5.0;
+/// `step(dt)` で一度に処理する実時間の上限。スリープ・デバッガ停止等で
+/// 巨大な `dt` が来たとき spiral-of-death を防ぐ（最大 15 物理ステップ / 呼び出し）。
+const MAX_ACCUMULATED_DT: f64 = 0.25;
 
 /// ボールの現在状態。f64 API で termray 側と揃える。
 pub struct BallState {
@@ -98,8 +102,15 @@ impl Physics {
     }
 
     /// 実時間 `dt` 秒分ぶん物理を進める。内部では `1/60s` 固定ステップで回す。
+    ///
+    /// 蓄積した実時間は [`MAX_ACCUMULATED_DT`] でクランプする。スリープ・
+    /// デバッガ停止などで巨大な `dt` が入ってきても、アキュムレータの while
+    /// ループが CPU を焼き切る spiral-of-death を起こさない。
     pub fn step(&mut self, dt: f64) {
         self.time_accumulator += dt;
+        if self.time_accumulator > MAX_ACCUMULATED_DT {
+            self.time_accumulator = MAX_ACCUMULATED_DT;
+        }
         while self.time_accumulator >= FIXED_DT {
             self.physics_pipeline.step(
                 self.gravity,
@@ -145,13 +156,16 @@ impl Physics {
         }
     }
 
-    /// ボールにショット速度を与える（`linvel` を直接置換）。
-    /// `impulse` 名だが、質量を跨がず速度をそのままセットするので呼び出し側は
-    /// 「初速 m/s」を渡せばよい。停止タイマーもリセットする。
-    pub fn launch(&mut self, impulse: [f64; 3]) {
+    /// ボールにショット初速を与える。線形速度を m/s で直接セットし、
+    /// impulse = J·s のような質量を跨ぐ計算はしない。停止タイマーもリセットする。
+    pub fn launch(&mut self, velocity_mps: [f64; 3]) {
         let body = &mut self.bodies[self.ball_handle];
         body.set_linvel(
-            Vector::new(impulse[0] as f32, impulse[1] as f32, impulse[2] as f32),
+            Vector::new(
+                velocity_mps[0] as f32,
+                velocity_mps[1] as f32,
+                velocity_mps[2] as f32,
+            ),
             true,
         );
         self.at_rest_timer = 0.0;
@@ -166,6 +180,8 @@ fn tile_material(tile: TileType) -> (f32, f32) {
         TILE_ROUGH => (0.5, 0.2),
         TILE_BUNKER => (0.9, 0.05),
         TILE_GREEN => (0.1, 0.1),
+        // TODO: Phase 3+ でウォーターハザード判定を追加（1打罰 + リプレース）。
+        // 現状 Phase 2 では物理的に solid として衝突するだけ。
         TILE_WATER => (0.2, 0.3),
         TILE_WALL => (0.4, 0.3),
         _ => (0.4, 0.2),
@@ -186,16 +202,16 @@ fn cell_triangles(course: &Course, x: i32, y: i32) -> [[Vector; 3]; 2] {
 }
 
 /// 地形 TriMesh コライダをタイル種ごとにグループ化して一括生成する。
-/// 追加で各 `TILE_WALL` セルには垂直 cuboid を置き、ボールの水平脱出を防ぐ。
+/// `TILE_WALL` は trimesh には含めず、垂直 cuboid で独立に扱う。
+/// （壁セルの z=0 床三角形は垂直 cuboid の陰に隠れて到達不能なため冗長）。
 fn build_terrain_colliders(course: &Course, colliders: &mut ColliderSet) {
-    let tile_types: [TileType; 7] = [
+    let tile_types: [TileType; 6] = [
         TILE_TEE,
         TILE_FAIRWAY,
         TILE_ROUGH,
         TILE_BUNKER,
         TILE_GREEN,
         TILE_WATER,
-        TILE_WALL,
     ];
 
     for &target in &tile_types {
@@ -310,6 +326,23 @@ mod tests {
         assert!((tris[1][0].z as f64 - h.floor[0]).abs() < 1e-6);
         assert!((tris[1][1].z as f64 - h.floor[3]).abs() < 1e-6);
         assert!((tris[1][2].z as f64 - h.floor[2]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn huge_dt_is_clamped_not_spiraling() {
+        // `step(10.0)` は最大 15 ステップ相当にクランプされるはず。
+        // panic しない & アキュムレータの残余が FIXED_DT 未満であることを確認。
+        let course = Course::generate(42);
+        let mut phys = Physics::new(&course, [5.0, 20.0, 25.0]);
+        let t0 = std::time::Instant::now();
+        phys.step(10.0);
+        let elapsed = t0.elapsed();
+        assert!(
+            elapsed.as_secs_f64() < 1.0,
+            "step(10.0) should clamp and return quickly, took {:?}",
+            elapsed
+        );
+        assert!(phys.time_accumulator < FIXED_DT);
     }
 
     #[test]
