@@ -10,9 +10,11 @@ pub mod camera_follow;
 pub mod collide;
 pub mod course;
 pub mod physics;
+pub mod shot;
 
 pub use camera_follow::{FollowCam, FollowMode};
 pub use collide::{step_x, step_y};
 pub use course::{Course, TILE_BUNKER, TILE_FAIRWAY, TILE_GREEN, TILE_ROUGH, TILE_TEE, TILE_WATER};
 pub use physics::{BallState, Physics};
+pub use shot::{Club, ClubSpec, ShotPhase, ShotState};
 pub use termray::{TILE_EMPTY, TILE_VOID, TILE_WALL};
