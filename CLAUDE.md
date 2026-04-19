@@ -12,7 +12,7 @@ Single-crate binary depending on the external [`termray`](https://github.com/kak
 - `src/lib.rs` — public surface. Empty at Phase 0, will grow with each phase
 - `src/course.rs` (Phase 1 — 実装済) — `Course`: implements `termray::TileMap` + `termray::HeightMap`. Hand-drawn 200×40 layout with tee / fairway / rough / bunkers / water / green + pin. Per-corner floor heights are precomputed with a seed-derived low-frequency noise base, a flat 20m rooftop tee, a water surface at -0.2m (solid), and a green bowl centered on the pin.
 - `src/physics.rs` (Phase 2) — rapier3d rigid-body world, ball state, course collider generation, step-and-sample integration
-- `src/shot.rs` (Phase 3) — shot input (club selection, aim, power) and the shot → ball-flight → rest sequence
+- `src/shot.rs` (Phase 3 — 実装済) — `ShotState` ステートマシン (`Aiming` / `PowerSwinging` / `Flight` / `AtRest`)、`Club` / `ClubSpec` テーブル、自己振動するパワーメーター、launch 速度計算。純粋ロジックでユニットテストのみ
 - `src/hud.rs` (Phase 4) — score card, club picker, wind / distance / lie indicators
 
 termray (external) owns raycasting: DDA walls, per-column ray-floor intersection, sprite and label projection. street-golf injects golf semantics (course surface heights, ball sprite, hole pin label) into termray through its trait-based hooks, while rapier3d owns the ball's trajectory and the camera rides along.
@@ -27,7 +27,17 @@ cargo fmt --all
 
 ## Current phase
 
-Phase 2 — rapier3d ball physics wired in. `Physics` (`src/physics.rs`) builds per-tile-type TriMesh colliders from `Course::cell_heights` using termray's `(NW,NE,SE)+(NW,SE,SW)` triangulation, drops in a 46g ball with CCD enabled, and runs at a fixed 60Hz timestep with an accumulator so render rate stays independent. `FollowCam` (`src/camera_follow.rs`) provides the third-person ShotStanding view (Flying / FirstPerson fall through to the same calculation until Phase 3). `cargo run --release --example shot_test` fires a hardcoded `(12, 0, 4) m/s` impulse and you watch the ball fly, land, roll, and rest. Phase 1's `fly_through` walkthrough is preserved. `src/main.rs` still runs the Phase 0 splash — it stays untouched until Phase 3 wires the real shot loop in.
+Phase 3 — shot input + swing sequence. `src/shot.rs` introduces `ShotState` として `Aiming → PowerSwinging → Flight → AtRest` の 4 ステート機を純粋ロジックで持つ。パワーメーターは `PowerSwinging` 中に 0→1→0 の三角波で自己振動し、Space 2 回押し（開始・停止）で値を確定する方式（crossterm の KeyRelease はポータブルに取れないため press/release 方式を避けた）。`Club` は Driver / 3I / 5I / 7I / 9I / PW / SW / Putter の 8 本を用意し `'1'..='8'` キーで切り替える。`src/main.rs` は Phase 0 スプラッシュを捨て、`Physics` + `FollowCam` + termray を駆動するフルゲームループに置き換わった。`cargo run --release` でティーからピンまで実際に何打か打って到達できる。ホールアウト判定・スコア確定は Phase 4 (#5) に続く。
+
+### 操作キー
+
+| キー | 効果 |
+|---|---|
+| `1`-`8` | クラブ選択（Driver / 3I / 5I / 7I / 9I / PW / SW / Putter） |
+| `a` / `d` | yaw（水平方向）を ±約 2° |
+| `w` / `s` | pitch（打ち出し角）を ±2°（0°-45° クランプ） |
+| `Space` | Aiming→PowerSwinging→Flight、AtRest→Aiming |
+| `Esc` | 終了 |
 
 ## Roadmap
 

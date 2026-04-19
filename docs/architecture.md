@@ -94,6 +94,57 @@ The ball is a 46 g dynamic rigid body (radius 2.1 cm) with CCD enabled. `Physics
 
 `examples/shot_test.rs` is the Phase 2 end-to-end demo: 0.5 s after launch it applies `set_linvel((12, 0, 4))` and visualises the flight-to-rest trajectory with the ShotStanding camera.
 
+## Phase 3 — shot input + swing sequence
+
+`src/shot.rs` is the pure-logic input state machine. It is completely independent of crossterm and termray so the tests can exercise every transition without touching a terminal.
+
+### State transitions
+
+```
+     [space]                 [space]               physics.at_rest
+Aiming ───► PowerSwinging ───────────► Flight ──────────────────► AtRest
+  ▲                                                                  │
+  └──────────────────────── [space] ─────────────────────────────────┘
+```
+
+- **Aiming** — `a/d` adjusts yaw, `w/s` adjusts pitch (0°-45° clamp), `1`-`8` switches club. Power meter is idle.
+- **PowerSwinging** — the power value auto-oscillates as a triangle wave (0 → 1 → 0 over `POWER_CYCLE_SEC = 2.4s`). Space snapshots the current value and releases the shot.
+- **Flight** — inputs are ignored. `src/main.rs` ticks the physics and waits for `BallState::at_rest` (with a `FLIGHT_REST_HOLD_SEC = 0.5s` guard against the at-rest flag tripping on frame 0 before velocity has ramped up from the impulse).
+- **AtRest** — HUD shows the tile the ball came to rest on. If it's on the green, the HUD suggests the putter. Space returns to Aiming for the next shot.
+
+### Club table
+
+| Key | Club | max_speed_mps | loft_deg | Label |
+|---|---|---|---|---|
+| `1` | Driver | 65.0 | 11.0 | `Driver` |
+| `2` | 3 Iron | 60.0 | 21.0 | `3I` |
+| `3` | 5 Iron | 55.0 | 26.0 | `5I` |
+| `4` | 7 Iron | 50.0 | 33.0 | `7I` |
+| `5` | 9 Iron | 43.0 | 40.0 | `9I` |
+| `6` | Pitching Wedge | 36.0 | 45.0 | `PW` |
+| `7` | Sand Wedge | 28.0 | 54.0 | `SW` |
+| `8` | Putter | 18.0 | 0.0 | `Putter` |
+
+Values are MVP-grade approximations — they're tuned so a 3-shot round can clear the 200m synthetic course (Driver → 7I → Putter works on the seed=42 layout).
+
+### Why auto-oscillating power (and not press-hold)
+
+Terminals under crossterm deliver `KeyEvent::Press` reliably, but `KeyEvent::Release` requires the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) or equivalent, which is not supported by iTerm2 / Terminal.app / most Windows consoles. A classic "hold space to fill, release to fire" meter would work on Kitty / modern Linux consoles only. The triangle-wave oscillator gives the same twitch-timing feel on every terminal with just `KeyPress`: start the swing with Space, release with a second Space when the bar is where you want it.
+
+### Velocity formula
+
+`ShotState::compute_launch_velocity` returns
+
+```
+v = speed * (cos(pitch) * cos(yaw),
+             cos(pitch) * sin(yaw),
+             sin(pitch))
+```
+
+with `speed = club.max_speed_mps * power` and `pitch = effective_pitch_deg.to_radians()`. `yaw = 0` points toward +X (pin direction on the synthetic course). `pitch = 0` is a horizontal roll shot; `pitch = 45°` is the high launch.
+
+`effective_pitch_deg` is the club's loft by default. Any `w`/`s` press flips `loft_override = true`, after which subsequent club switches no longer clobber the manual angle — convenient when you want to chip with a wedge at a custom angle, for instance.
+
 ## Current state (Phase 1)
 
 `src/course.rs` now defines `Course` — a synthetic 1-hole course that implements both `termray::TileMap` and `termray::HeightMap`. `examples/fly_through.rs` drives it as an interactive walkthrough so the terrain can be verified visually before Phase 2 introduces ball physics.
