@@ -27,7 +27,7 @@ cargo fmt --all
 
 ## Current phase
 
-Phase 1 — synthetic course. `cargo run --release --example fly_through` opens a 200m × 40m hand-drawn course (tee / fairway / rough / two bunkers / water hazard / green + pin) on top of termray 0.3's sloped-floor rendering. `Course::generate(42)` is seed-deterministic; the walkthrough lets you verify the terrain before ball physics land in Phase 2. `src/main.rs` still runs the Phase 0 splash — it stays untouched until Phase 2 wires rapier3d in.
+Phase 2 — rapier3d ball physics wired in. `Physics` (`src/physics.rs`) builds per-tile-type TriMesh colliders from `Course::cell_heights` using termray's `(NW,NE,SE)+(NW,SE,SW)` triangulation, drops in a 46g ball with CCD enabled, and runs at a fixed 60Hz timestep with an accumulator so render rate stays independent. `FollowCam` (`src/camera_follow.rs`) provides the third-person ShotStanding view (Flying / FirstPerson fall through to the same calculation until Phase 3). `cargo run --release --example shot_test` fires a hardcoded `(12, 0, 4) m/s` impulse and you watch the ball fly, land, roll, and rest. Phase 1's `fly_through` walkthrough is preserved. `src/main.rs` still runs the Phase 0 splash — it stays untouched until Phase 3 wires the real shot loop in.
 
 ## Roadmap
 

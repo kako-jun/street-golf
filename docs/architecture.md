@@ -79,6 +79,21 @@ Phase 1 (#2)  Course heightmap ───┬┘
 - **Phase 4** adds `hud.rs`: score card, club indicator, hole-out detection, round end.
 - **Phase 5+** replaces the synthetic course with real-world data pulled from OpenStreetMap (geometry) and SRTM (elevation).
 
+## Phase 2 — ball physics wired in
+
+`src/physics.rs` turns `Course::cell_heights` into rapier3d 0.32 colliders. Two invariants drive the build:
+
+1. **Triangulation matches termray's floor renderer.** Every cell `(x, y)` is split into `(NW, NE, SE)` + `(NW, SE, SW)` — the same split termray uses when it rasterises the sloped floor. The `(NW, NE, SE) + (NW, SE, SW)` split matches termray's bilinear surface exactly along the NW→SE diagonal; off-diagonal points deviate by at most the bilinear patch saddle, which is sub-centimetre for Phase 1 terrain (±0.4m amplitude). The deviation is invisible at the ball's 0.021m radius and the 60Hz integration step. Corners use termray's `CornerHeights.floor = [NW, NE, SW, SE]` directly.
+2. **Vertical axis is Z.** rapier3d's default is Y-up; street-golf sets gravity to `(0, 0, -9.81)` and constructs all `Vector::new(x, y, z)` with z as height, staying consistent with termray's Z coordinate.
+
+Triangles are grouped by the target tile type (TEE / FAIRWAY / ROUGH / BUNKER / GREEN / WATER), and each group becomes one `ColliderBuilder::trimesh` fixed collider with its own friction / restitution. Wall cells are handled exclusively by a vertical `cuboid(0.5, 0.5, 5.0)` per cell so the ball can't escape through the map border even if it launches high — their z=0 floor triangles would be unreachable behind the cuboid, so the trimesh build skips `TILE_WALL` entirely.
+
+The ball is a 46 g dynamic rigid body (radius 2.1 cm) with CCD enabled. `Physics::step(dt)` runs as many fixed 1/60 s physics ticks as `dt` warrants via an accumulator, leaving the render loop free to run at whatever pace the terminal can sustain. At-rest detection is `|linvel| < 0.05 ∧ |angvel| < 0.1` held for 0.5 s.
+
+`FollowCam` (`src/camera_follow.rs`) derives the termray camera pose from the ball state. The MVP mode `ShotStanding` places the camera 5 m behind the ball (along yaw) and 2 m above, with a small downward pitch. `Flying` and `FirstPerson` exist as enum variants for Phase 3+ but currently fall through to `ShotStanding` to avoid `todo!()` panics in example code.
+
+`examples/shot_test.rs` is the Phase 2 end-to-end demo: 0.5 s after launch it applies `set_linvel((12, 0, 4))` and visualises the flight-to-rest trajectory with the ShotStanding camera.
+
 ## Current state (Phase 1)
 
 `src/course.rs` now defines `Course` — a synthetic 1-hole course that implements both `termray::TileMap` and `termray::HeightMap`. `examples/fly_through.rs` drives it as an interactive walkthrough so the terrain can be verified visually before Phase 2 introduces ball physics.

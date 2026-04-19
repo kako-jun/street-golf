@@ -7,6 +7,17 @@ All notable changes to street-golf are documented in this file. The format is ba
 ## [Unreleased]
 
 ### Added
+- Phase 2 rapier3d ball physics + follow camera
+  ([#3](https://github.com/kako-jun/street-golf/issues/3)).
+  `src/physics.rs` wraps a rapier3d 0.32 world with per-tile-type TriMesh
+  colliders generated from `Course::cell_heights` using the
+  `(NW,NE,SE)+(NW,SE,SW)` triangulation that matches termray's floor renderer,
+  plus vertical cuboid colliders on wall cells. The ball is a 46 g dynamic body
+  of radius 2.1 cm with CCD. `Physics::step` runs fixed 60Hz steps via an
+  accumulator so render rate stays independent. `src/camera_follow.rs` adds
+  `FollowCam` with the third-person `ShotStanding` mode (Flying / FirstPerson
+  fall through until Phase 3). `examples/shot_test.rs` fires a hardcoded
+  `(12, 0, 4) m/s` launch at 0.5s and visualises the flight-to-rest sequence.
 - Phase 1 synthetic course ([#2](https://github.com/kako-jun/street-golf/issues/2)).
   `src/course.rs` introduces `Course`, which implements both `termray::TileMap`
   and `termray::HeightMap` for a hand-drawn 200m × 40m layout (rooftop tee,
