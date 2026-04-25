@@ -31,6 +31,10 @@ use termray::{
     TileType, WallTexturer, project_sprites, render_floor_ceiling, render_sprites, render_walls,
 };
 
+/// レイキャスト最大距離（m）。Phase 1 の合成コースは 200×40 セルで Par 4 の
+/// tee→pin が ~185m あるため、tee からピンを視認できるよう 180m 以上を確保する。
+/// 上げるほど per-column DDA の最悪ステップ数が伸びるので、コース寸法に
+/// 合わせた最小値を選ぶこと。
 const MAX_DISTANCE: f64 = 180.0;
 const PIN_SPRITE_TYPE: u8 = 1;
 const BALL_SPRITE_TYPE: u8 = 2;
@@ -208,13 +212,25 @@ fn handle_play_key(shot: &mut ShotState, code: KeyCode) -> PlayAction {
     }
 }
 
-/// ParSelect フェーズで受け付けるキー。上下矢印で選択、Enter/Space/数字で確定。
-fn handle_par_select_key(code: KeyCode) -> ParAction {
+/// ParSelect フェーズで受け付けるキー。上下矢印で `selected` を移動、Enter/Space で
+/// 現在の選択を確定、数字キーで直接確定。
+fn handle_par_select_key(code: KeyCode, selected: &mut u32) -> ParAction {
     match code {
         KeyCode::Esc => ParAction::Quit,
-        KeyCode::Enter | KeyCode::Char(' ') => ParAction::Select(0), // 0 = confirm current
+        KeyCode::Enter | KeyCode::Char(' ') => ParAction::Confirm,
         KeyCode::Char(c @ ('3' | '4' | '5')) => ParAction::Select(c.to_digit(10).unwrap()),
-        KeyCode::Up | KeyCode::Down => ParAction::Continue,
+        KeyCode::Up => {
+            if *selected > 3 {
+                *selected -= 1;
+            }
+            ParAction::Continue
+        }
+        KeyCode::Down => {
+            if *selected < 5 {
+                *selected += 1;
+            }
+            ParAction::Continue
+        }
         _ => ParAction::Continue,
     }
 }
@@ -223,6 +239,7 @@ fn handle_par_select_key(code: KeyCode) -> ParAction {
 enum ParAction {
     Continue,
     Quit,
+    Confirm,
     Select(u32),
 }
 
@@ -568,24 +585,17 @@ fn main() -> Result<()> {
         while poll(Duration::from_millis(0))? {
             if let Event::Key(key) = read()? {
                 match round.phase {
-                    RoundPhase::ParSelect => match handle_par_select_key(key.code) {
-                        ParAction::Continue => {
-                            if matches!(key.code, KeyCode::Up) {
-                                if selected_par > 3 {
-                                    selected_par -= 1;
-                                }
-                            } else if matches!(key.code, KeyCode::Down) {
-                                if selected_par < 5 {
-                                    selected_par += 1;
-                                }
+                    RoundPhase::ParSelect => {
+                        match handle_par_select_key(key.code, &mut selected_par) {
+                            ParAction::Continue => {}
+                            ParAction::Quit => return Ok(()),
+                            ParAction::Confirm => round.select_par(selected_par),
+                            ParAction::Select(p) => {
+                                selected_par = p;
+                                round.select_par(p);
                             }
                         }
-                        ParAction::Quit => return Ok(()),
-                        ParAction::Select(p) => {
-                            let par = if p == 0 { selected_par } else { p };
-                            round.select_par(par);
-                        }
-                    },
+                    }
                     RoundPhase::Playing => match handle_play_key(&mut shot, key.code) {
                         PlayAction::Continue => {}
                         PlayAction::Quit => return Ok(()),
