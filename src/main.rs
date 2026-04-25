@@ -331,7 +331,7 @@ fn play_hud(
             )
         }
     };
-    let line3 = "Keys: 1-8=club  a/d=yaw  w/s=pitch  space=shoot  x=cancel  esc=quit".to_string();
+    let line3 = "Keys: 1-8=club  ←→=yaw  ↑↓=pitch  space=shoot  x=cancel  esc=quit".to_string();
     let lines = [
         line0,
         line1,
