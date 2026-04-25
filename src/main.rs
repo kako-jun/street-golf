@@ -31,7 +31,7 @@ use termray::{
     TileType, WallTexturer, project_sprites, render_floor_ceiling, render_sprites, render_walls,
 };
 
-const MAX_DISTANCE: f64 = 60.0;
+const MAX_DISTANCE: f64 = 180.0;
 const PIN_SPRITE_TYPE: u8 = 1;
 const BALL_SPRITE_TYPE: u8 = 2;
 /// Flight 開始直後は `at_rest=true` が 1 フレームだけ立つことがあるので、
@@ -177,19 +177,19 @@ fn handle_play_key(shot: &mut ShotState, code: KeyCode) -> PlayAction {
                 PlayAction::Continue
             }
         }
-        KeyCode::Char('a') => {
+        KeyCode::Left => {
             shot.adjust_yaw(-YAW_STEP_RAD);
             PlayAction::Continue
         }
-        KeyCode::Char('d') => {
+        KeyCode::Right => {
             shot.adjust_yaw(YAW_STEP_RAD);
             PlayAction::Continue
         }
-        KeyCode::Char('w') => {
+        KeyCode::Up => {
             shot.adjust_pitch(PITCH_STEP_DEG);
             PlayAction::Continue
         }
-        KeyCode::Char('s') => {
+        KeyCode::Down => {
             shot.adjust_pitch(-PITCH_STEP_DEG);
             PlayAction::Continue
         }
@@ -208,12 +208,13 @@ fn handle_play_key(shot: &mut ShotState, code: KeyCode) -> PlayAction {
     }
 }
 
-/// ParSelect フェーズで受け付けるキー。`Some(par)` で Par 確定、`None` で
-/// 入力継続、`Err` で終了要求。
+/// ParSelect フェーズで受け付けるキー。上下矢印で選択、Enter/Space/数字で確定。
 fn handle_par_select_key(code: KeyCode) -> ParAction {
     match code {
         KeyCode::Esc => ParAction::Quit,
+        KeyCode::Enter | KeyCode::Char(' ') => ParAction::Select(0), // 0 = confirm current
         KeyCode::Char(c @ ('3' | '4' | '5')) => ParAction::Select(c.to_digit(10).unwrap()),
+        KeyCode::Up | KeyCode::Down => ParAction::Continue,
         _ => ParAction::Continue,
     }
 }
@@ -255,18 +256,21 @@ fn tile_name(tile: Option<TileType>) -> &'static str {
 }
 
 /// Par 選択画面の HUD 文字列。
-fn par_select_hud(width: usize) -> String {
+fn par_select_hud(selected: u32, width: usize) -> String {
+    let mark_3 = if selected == 3 { ">" } else { " " };
+    let mark_4 = if selected == 4 { ">" } else { " " };
+    let mark_5 = if selected == 5 { ">" } else { " " };
     let lines = [
-        "========== street-golf ==========".to_string(),
+        "street-golf".to_string(),
         "Course: Phase 1 synthetic (seed 42)".to_string(),
-        "Select par:".to_string(),
-        "  [3] Par 3   (~130m)".to_string(),
-        "  [4] Par 4   (~185m)  <-- recommended".to_string(),
-        "  [5] Par 5   (~220m)".to_string(),
-        "Esc: Quit".to_string(),
+        "Select par (↑↓ or 3/4/5):".to_string(),
+        format!("{} Par 3   (~130m)", mark_3),
+        format!("{} Par 4   (~185m)  <-- recommended", mark_4),
+        format!("{} Par 5   (~220m)", mark_5),
+        "Esc: Quit / Enter: Play".to_string(),
         String::new(),
     ];
-    pad_lines(&lines, width)
+    border_hud(&lines, width)
 }
 
 /// Playing フェーズの HUD 文字列。`HUD_ROWS=8` で Par 選択画面 / プレイ中 /
@@ -338,7 +342,7 @@ fn play_hud(
         String::new(),
         String::new(),
     ];
-    pad_lines(&lines, width)
+    border_hud(&lines, width)
 }
 
 /// Finished フェーズの HUD 文字列。結果サマリ + ストローク履歴 + 操作案内。
@@ -413,7 +417,7 @@ fn end_hud(result: &RoundResult, log: &[StrokeRecord], width: usize) -> String {
     }
     lines.push(footer);
     debug_assert_eq!(lines.len(), HUD_ROWS);
-    pad_lines(&lines, width)
+    border_hud(&lines, width)
 }
 
 /// 行配列を width で truncate / pad し、`\r\n` で連結する（末尾改行なし）。
@@ -435,6 +439,32 @@ fn pad_lines(lines: &[String], width: usize) -> String {
             out.push_str("\r\n");
         }
     }
+    out
+}
+
+fn border_hud(lines: &[String], width: usize) -> String {
+    let inner_width = width.saturating_sub(2);
+    let padded = pad_lines(lines, inner_width);
+    let mut out = String::new();
+
+    out.push('╔');
+    for _ in 0..inner_width {
+        out.push('═');
+    }
+    out.push_str("╗\r\n");
+
+    for line in padded.lines() {
+        out.push('║');
+        out.push_str(line);
+        out.push_str("║\r\n");
+    }
+
+    out.push('╚');
+    for _ in 0..inner_width {
+        out.push('═');
+    }
+    out.push('╝');
+
     out
 }
 
@@ -519,6 +549,7 @@ fn main() -> Result<()> {
     let mut shot = ShotState::new(0.0);
     let mut follow = FollowCam::new(FollowMode::ShotStanding, 0.0);
     let mut round = RoundState::new(ball_spawn);
+    let mut selected_par = 4u32; // Default: Par 4 (recommended)
 
     let mut cam = Camera::with_z(tee_x, tee_y, tee_z, 0.0, 70f64.to_radians());
     let mut fb = Framebuffer::new(fb_w, fb_h);
@@ -538,9 +569,22 @@ fn main() -> Result<()> {
             if let Event::Key(key) = read()? {
                 match round.phase {
                     RoundPhase::ParSelect => match handle_par_select_key(key.code) {
-                        ParAction::Continue => {}
+                        ParAction::Continue => {
+                            if matches!(key.code, KeyCode::Up) {
+                                if selected_par > 3 {
+                                    selected_par -= 1;
+                                }
+                            } else if matches!(key.code, KeyCode::Down) {
+                                if selected_par < 5 {
+                                    selected_par += 1;
+                                }
+                            }
+                        }
                         ParAction::Quit => return Ok(()),
-                        ParAction::Select(p) => round.select_par(p),
+                        ParAction::Select(p) => {
+                            let par = if p == 0 { selected_par } else { p };
+                            round.select_par(par);
+                        }
                     },
                     RoundPhase::Playing => match handle_play_key(&mut shot, key.code) {
                         PlayAction::Continue => {}
@@ -644,7 +688,7 @@ fn main() -> Result<()> {
 
         // --- HUD / ステータス ---
         let status = match round.phase {
-            RoundPhase::ParSelect => par_select_hud(fb_w),
+            RoundPhase::ParSelect => par_select_hud(selected_par, fb_w),
             RoundPhase::Playing => play_hud(&shot, &round, ball.pos, ball.vel, &course, fb_w),
             RoundPhase::Finished => {
                 // result は finish() で必ず埋まっている。

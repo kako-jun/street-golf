@@ -27,8 +27,8 @@ cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics 
 水ハザードでボールが止まると +1 打ペナルティでショット開始位置に戻る。
 スコアラベル (Birdie/Par 等) はストローク数のみで判定し、ペナルティは Total と vs Par に反映される。
 
-1. **Par select screen** — choose Par 3 / 4 / 5 with the `3` / `4` / `5` key. The Phase 1 synthetic course is tuned for Par 4 (~185m tee-to-pin) but all three are playable.
-2. **Shot loop** — aim with `a` / `d` (yaw) and `w` / `s` (pitch), pick a club with `1`-`8`, then:
+1. **Par select screen** — choose Par 3 / 4 / 5 with the arrow keys (↑↓) or `3` / `4` / `5` keys, then press Enter to start. The Phase 1 synthetic course is tuned for Par 4 (~185m tee-to-pin) but all three are playable.
+2. **Shot loop** — aim with arrow keys (←→ for yaw, ↑↓ for pitch), pick a club with `1`-`8`, then:
    - Press `Space` once — the power meter starts oscillating 0 → 100% → 0% on a 2.4s triangle wave.
    - Press `Space` again — whichever value is showing at that instant becomes the shot's strength, and the ball flies.
    - `x` during the power swing cancels back to aim.
@@ -41,10 +41,12 @@ cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics 
 
 | Key | Phase | Effect |
 |---|---|---|
-| `3` / `4` / `5` | Par select | Pick par and start playing |
+| `↑` / `↓` | Par select | Select par up / down |
+| `3` / `4` / `5` | Par select | Quick pick par and start playing |
+| `Enter` / `Space` | Par select | Confirm selected par and start playing |
 | `1`-`8` | Playing | Club: Driver / 3I / 5I / 7I / 9I / PW / SW / Putter |
-| `a` / `d` | Playing | Yaw left / right (~2°) |
-| `w` / `s` | Playing | Pitch up / down (0°-45°) |
+| `←` / `→` | Playing | Yaw left / right (~2°) |
+| `↑` / `↓` | Playing | Pitch up / down (0°-45°) |
 | `Space` | Playing | Aim → start swing → release → (after rest) back to aim |
 | `x` | Playing | Cancel the current swing (PowerSwinging → Aiming) |
 | `Y` | Finished | Retry with the same par |
