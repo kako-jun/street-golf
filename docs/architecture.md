@@ -88,7 +88,7 @@ Phase 1 (#2)  Course heightmap ───┬┘
 
 Triangles are grouped by the target tile type (TEE / FAIRWAY / ROUGH / BUNKER / GREEN / WATER), and each group becomes one `ColliderBuilder::trimesh` fixed collider with its own friction / restitution. Wall cells are handled exclusively by a vertical `cuboid(0.5, 0.5, 5.0)` per cell so the ball can't escape through the map border even if it launches high — their z=0 floor triangles would be unreachable behind the cuboid, so the trimesh build skips `TILE_WALL` entirely.
 
-The ball is a 46 g dynamic rigid body (radius 2.1 cm) with CCD enabled. `Physics::step(dt)` runs as many fixed 1/60 s physics ticks as `dt` warrants via an accumulator, leaving the render loop free to run at whatever pace the terminal can sustain. At-rest detection is `|linvel| < 0.05 ∧ |angvel| < 0.1` held for 0.5 s.
+The ball is a 46 g dynamic rigid body (radius 2.1 cm) with CCD enabled. `Physics::step(dt)` runs as many fixed 1/60 s physics ticks as `dt` warrants via an accumulator, leaving the render loop free to run at whatever pace the terminal can sustain. At-rest detection is `|linvel| < 0.25 ∧ |angvel| < 0.5` held for 0.25 s — the thresholds are tuned for player-perceived "stopped" feel rather than physical rest, so the next-shot prompt arrives without a long settling wait.
 
 `FollowCam` (`src/camera_follow.rs`) derives the termray camera pose from the ball state. The MVP mode `ShotStanding` places the camera 5 m behind the ball (along yaw) and 2 m above, with a small downward pitch. `Flying` and `FirstPerson` exist as enum variants for Phase 3+ but currently fall through to `ShotStanding` to avoid `todo!()` panics in example code.
 
@@ -239,6 +239,14 @@ The dependency list is deliberately minimal. Phase 5+ will add OSM / SRTM parser
 (`round.last_start_pos`) に `Physics::teleport_ball` でボールを戻す。線速度・
 角速度はゼロ化するのでそのまま次のショット入力に入れる。ホールインして
 いない場合のみ発動する。
+
+### Out-of-bounds penalty
+
+壁コライダは z=0..10 の垂直 cuboid で、コース面の z=20 より下にしか効かない。
+強いショットで壁の上を抜けるとボールはマップ外の何もない領域に出て無限落下
+するため、`tile_at(ball)` が `None`、または `ball.pos.z < 10.0` を満たした
+時点で `at_rest` を待たずに 1 打罰扱い（水ペナルティと同じ復帰処理）にする。
+壁コライダ自体を高くすれば根本解決になるが、現状は OOB 検知で不変式を保つ。
 
 ### Score label table
 

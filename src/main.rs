@@ -41,8 +41,8 @@ const BALL_SPRITE_TYPE: u8 = 2;
 /// Flight 開始直後は `at_rest=true` が 1 フレームだけ立つことがあるので、
 /// launch からこの秒数は `notify_rest` を抑制する（発射直後の
 /// 速度ランプアップ中に誤判定で AtRest に落ちるのを防ぐ）。
-/// `Physics::AT_REST_DURATION` (0.5s) と合わせて、launch から AtRest まで
-/// 最低 1 秒未満は絶対にならない。片方を上げるときはもう片方も再考すること。
+/// `Physics::AT_REST_DURATION` (0.25s) と合わせて、launch から最短でも
+/// 0.5s 経たないと AtRest 遷移しない。片方を変えるときはもう片方も再考すること。
 const FLIGHT_REST_HOLD_SEC: f64 = 0.5;
 /// HUD と End ダイアログ共通の高さ。End ダイアログが 8 行（ヘッダ + 最大 5
 /// 履歴 + フッタ）を必要とするため、ゲーム中の Playing HUD もそれに合わせる。
@@ -108,7 +108,9 @@ impl GolfArt {
         const PIN_PATTERN: &[&str] = &[
             "##.", "##.", "##.", "#..", "#..", "#..", "#..", "#..", "#..", "#..",
         ];
-        const BALL_PATTERN: &[&str] = &[".#.", "###", ".#."];
+        // 5x5 の丸めた形。3x3 の十字 (`.#. / ### / .#.`) だと近距離で
+        // プラス記号に見えるため、コーナーを欠いた塊にしてボールっぽく見せる。
+        const BALL_PATTERN: &[&str] = &[".###.", "#####", "#####", "#####", ".###."];
         Self {
             pin: SpriteDef {
                 pattern: PIN_PATTERN,
@@ -485,6 +487,32 @@ fn border_hud(lines: &[String], width: usize) -> String {
     out
 }
 
+/// 描画前に framebuffer を「水色の空 + 緑の無限地面」で塗りつぶす。
+///
+/// `render_floor_ceiling` は per-column DDA を `MAX_DISTANCE` までしか歩かない
+/// ため、地平線付近の遠距離ピクセルは塗り残されて clear 色（既定 = 黒）の
+/// まま残る。事前に水平線で 2 トーンを置いておくと、塗り残しが空 / 草地と
+/// して自然に補完される。`center_y` の式は termray の Camera ドキュメント
+/// 通り（pitch を horizon shift として扱う擬似ピッチ）。
+fn fill_sky_ground(fb: &mut Framebuffer, cam: &Camera) {
+    const SKY: Color = Color::rgb(130, 170, 210);
+    const GROUND: Color = Color::rgb(70, 110, 55);
+    let fb_w = fb.width();
+    let fb_h = fb.height();
+    if fb_w == 0 || fb_h == 0 {
+        return;
+    }
+    let focal_px = (fb_w as f64 / 2.0) / (cam.fov / 2.0).tan();
+    let center_y = (fb_h as f64 / 2.0 + cam.pitch.tan() * focal_px).clamp(0.0, fb_h as f64);
+    let horizon = center_y as usize;
+    for y in 0..fb_h {
+        let color = if y < horizon { SKY } else { GROUND };
+        for x in 0..fb_w {
+            fb.set_pixel(x, y, color);
+        }
+    }
+}
+
 /// Finished フェーズ用に framebuffer 中央を薄暗くする（ダイアログ背景）。
 fn dim_center(fb: &mut Framebuffer) {
     let w = fb.width();
@@ -633,18 +661,22 @@ fn main() -> Result<()> {
         let ball = physics.ball_state();
 
         // Flight → AtRest 遷移時にカップ判定 + 水ペナルティ + 履歴記録。
+        // OOB（マップ外 or 地表より十分下）は at_rest を待たず即ペナルティで
+        // 復帰させる。壁は z=10 までしか効かず、コース面が z=20 にあるため
+        // 強いショットで壁を超えると地形コライダが無く永遠に落下する。
         if shot.phase == ShotPhase::Flight {
             flight_timer += dt;
         }
+        let tile = course.tile_at(ball.pos[0].floor() as i32, ball.pos[1].floor() as i32);
+        let oob = tile.is_none() || ball.pos[2] < 10.0;
         if round.phase == RoundPhase::Playing
             && shot.phase == ShotPhase::Flight
-            && ball.at_rest
+            && (ball.at_rest || oob)
             && flight_timer > FLIGHT_REST_HOLD_SEC
         {
             let pin = course.pin_world_pos();
-            let holed = check_hole_out(&ball, pin);
-            let tile = course.tile_at(ball.pos[0].floor() as i32, ball.pos[1].floor() as i32);
-            let penalty = !holed && tile == Some(TILE_WATER);
+            let holed = !oob && check_hole_out(&ball, pin);
+            let penalty = oob || (!holed && tile == Some(TILE_WATER));
             round.record_stroke(
                 shot.club,
                 shot.power,
@@ -670,7 +702,7 @@ fn main() -> Result<()> {
         cam.set_pitch(cpitch);
 
         // --- 描画 ---
-        fb.clear(Color::default());
+        fill_sky_ground(&mut fb, &cam);
         let rays = cam.cast_all_rays(&course, fb_w, MAX_DISTANCE);
         render_floor_ceiling(&mut fb, &rays, &scene, &course, &cam, MAX_DISTANCE);
         render_walls(&mut fb, &rays, &scene, &course, &cam, MAX_DISTANCE);

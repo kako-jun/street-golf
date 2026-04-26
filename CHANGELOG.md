@@ -6,6 +6,30 @@ All notable changes to street-golf are documented in this file. The format is ba
 
 ## [Unreleased]
 
+### Changed
+- 描画前に framebuffer を「水色の空 + 緑の地面」で塗りつぶすようになった
+  (`fill_sky_ground` in `src/main.rs`)。`render_floor_ceiling` は per-column
+  DDA を `MAX_DISTANCE = 180m` までしか歩かないため地平線付近に塗り残しが
+  発生し、`fb.clear(Color::default())` のままだとそこが黒くてさみしい見た目
+  になっていた。`Camera` の `pitch` を horizon shift として扱う擬似ピッチに
+  追従して水平線を計算するので、上を向いても下を向いても 2 トーンが正しく
+  ずれる。
+- ボールスプライトを `.#./###/.#.`（3x3 十字）から 5x5 のコーナーを欠いた
+  塊に変更。近距離でプラス記号に見えていたのを丸っぽい塊に。
+- 静止判定の閾値を `|linvel| < 0.05 ∧ |angvel| < 0.1` 0.5s 保持から
+  `|linvel| < 0.25 ∧ |angvel| < 0.5` 0.25s 保持に緩和
+  (`src/physics.rs`)。実球は 0.05 m/s でも転がり続けるため、プレイヤー
+  体感の「もう動いてない」に合わせた。`FLIGHT_REST_HOLD_SEC` のドキュ
+  コメントも整合する値に更新。
+
+### Fixed
+- コース外（マップ外 or 地表 z=20 より十分下）に出たボールが永遠に落下し
+  ラウンドが進まなくなる不具合を修正。壁コライダが z=0..10 にしかなく強い
+  ショットで壁の上を抜けると地形コライダが無いため、`tile_at` が `None` か
+  `ball.pos.z < 10.0` になった時点で `at_rest` を待たず水ペナルティと同じ
+  復帰処理を走らせる (`src/main.rs`)。壁コライダ自体を高くする根本修正は
+  別 Issue 扱い。
+
 ### Added
 - Phase 4 hole-out + score card + round end
   ([#5](https://github.com/kako-jun/street-golf/issues/5)).

@@ -34,8 +34,9 @@ cargo run --release --example shot_test      # Phase 2 hardcoded 1-shot physics 
    - `x` during the power swing cancels back to aim.
 3. **Ball at rest** — after the ball stops, the HUD shows its lie (fairway / rough / green / bunker / tee) and recommends the putter on the green. Press `Space` to start the next shot.
 4. **Water penalty** — if the ball comes to rest on a water tile, you take a 1-stroke penalty and the ball is teleported back to where you teed this shot from.
-5. **Hole out** — once the ball ends inside the cup (5.4cm radius) at under 2 m/s, the round ends. The HUD shows your score (Hole in One / Albatross / Eagle / Birdie / Par / Bogey / …) plus a stroke-by-stroke recap.
-6. **Retry or quit** — press `Y` to play the same par again, or `N` / `Esc` to exit.
+5. **Out-of-bounds** — if the ball flies over the perimeter wall and leaves the course (or falls below playable elevation), the same 1-stroke penalty applies and the ball returns to the shot origin.
+6. **Hole out** — once the ball ends inside the cup (5.4cm radius) at under 2 m/s, the round ends. The HUD shows your score (Hole in One / Albatross / Eagle / Birdie / Par / Bogey / …) plus a stroke-by-stroke recap.
+7. **Retry or quit** — press `Y` to play the same par again, or `N` / `Esc` to exit.
 
 ### Controls
 

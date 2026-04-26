@@ -21,9 +21,11 @@ const FIXED_DT: f64 = 1.0 / 60.0;
 const BALL_RADIUS: f64 = 0.021;
 // R&A/USGA 規格: ゴルフボールは 45.93g 以下。46g を丸めて採用。
 const BALL_MASS: f64 = 0.046;
-const AT_REST_LINVEL: f64 = 0.05;
-const AT_REST_ANGVEL: f64 = 0.1;
-const AT_REST_DURATION: f64 = 0.5;
+// 静止判定はゲームプレイ用に緩めに取る。実球は 0.05 m/s でも転がり続けるが、
+// プレイヤーから見て「もう動いてない」体感に合わせて閾値を上げる。
+const AT_REST_LINVEL: f64 = 0.25;
+const AT_REST_ANGVEL: f64 = 0.5;
+const AT_REST_DURATION: f64 = 0.25;
 const WALL_CEILING_HALF: f64 = 5.0;
 /// `step(dt)` で一度に処理する実時間の上限。スリープ・デバッガ停止等で
 /// 巨大な `dt` が来たとき spiral-of-death を防ぐ（最大 15 物理ステップ / 呼び出し）。
